@@ -1,7 +1,73 @@
+import cv2
+import numpy as np
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QTextEdit, QStackedWidget, QMessageBox
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from database import create_patient_table, insert_patient, get_all_patients, update_patient_urgency
+from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal
+from PyQt6.QtGui import QFont, QImage, QPixmap
+from app.vision import HandDetector
+from .database import create_patient_table, insert_patient, get_all_patients, update_patient_urgency
+
+class CameraWindow(QWidget):
+    gesture_detected = pyqtSignal(str, object)
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Cámara de Gestos")
+        self.setGeometry(1150, 100, 320, 240)
+
+        # Configuración de la cámara y detector de manos
+        self.cap = cv2.VideoCapture(0)
+        self.detector = HandDetector(detection_con=0.8, max_hands=1)
+
+        # Etiqueta para mostrar el video
+        self.camera_label = QLabel()
+        layout = QVBoxLayout()
+        layout.addWidget(self.camera_label)
+        self.setLayout(layout)
+
+        # Temporizador para actualizar el frame
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)
+
+    def update_frame(self):
+        success, img = self.cap.read()
+        if not success:
+            return
+
+        img = self.detector.find_hands(img, draw=False)
+        lm_list = self.detector.find_position(img)
+
+        if len(lm_list) != 0:
+            if self.detector.is_fist():
+                self.gesture_detected.emit("fist", {})
+            else:
+                hover_pos = self.detector.get_hover_position()
+                if hover_pos:
+                    self.gesture_detected.emit("hover", {"x": hover_pos[0], "y": hover_pos[1]})
+
+            swipe_gesture = self.detector.detect_swipe()
+            if swipe_gesture:
+                self.gesture_detected.emit("swipe", {"direction": swipe_gesture})
+
+            fingers = self.detector.fingers_up()
+            if fingers[0] == 1 and all(f == 0 for f in fingers[1:]):
+                self.gesture_detected.emit("thumb", {"direction": "up"})
+            elif sum(fingers) == 0:
+                self.gesture_detected.emit("thumb", {"direction": "down"})
+
+        img = self.detector.find_hands(img, draw=True)
+
+        img = cv2.flip(img, 1)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, ch = img_rgb.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        self.camera_label.setPixmap(QPixmap.fromImage(qt_image))
+
+    def closeEvent(self, event):
+        self.cap.release()
+        event.accept()
 
 # ==================== ESTILOS ====================
 STYLE_SHEET = """
@@ -30,6 +96,10 @@ STYLE_SHEET = """
     
     QPushButton:pressed {
         background-color: #1d4ed8;
+    }
+
+    QPushButton[selected="true"] {
+        border: 4px solid #facc15; /* Yellow-400 */
     }
     
     QPushButton#btnSecondary {
@@ -87,9 +157,10 @@ STYLE_SHEET = """
 
 # ==================== PÁGINA PRINCIPAL ====================
 class MainMenuPage(QWidget):
-    def __init__(self, switch_page_callback):
+    def __init__(self, main_window):
         super().__init__()
-        self.switch_page = switch_page_callback
+        self.main_window = main_window
+        self.switch_page = self.main_window.switch_page
         self.init_ui()
     
     def init_ui(self):
@@ -136,9 +207,10 @@ class MainMenuPage(QWidget):
 
 # ==================== PÁGINA DE REGISTRO ====================
 class RegisterPage(QWidget):
-    def __init__(self, switch_page_callback):
+    def __init__(self, main_window):
         super().__init__()
-        self.switch_page = switch_page_callback
+        self.main_window = main_window
+        self.switch_page = self.main_window.switch_page
         self.init_ui()
     
     def init_ui(self):
@@ -236,9 +308,10 @@ class RegisterPage(QWidget):
 
 # ==================== PÁGINA ASISTENTE ====================
 class AssistantPage(QWidget):
-    def __init__(self, switch_page_callback):
+    def __init__(self, main_window):
         super().__init__()
-        self.switch_page = switch_page_callback
+        self.main_window = main_window
+        self.switch_page = self.main_window.switch_page
         self.init_ui()
     
     def init_ui(self):
@@ -273,7 +346,7 @@ class AssistantPage(QWidget):
         buttons = [
             ("💧 Pedir Agua", self.request_water),
             ("🚽 Pedir Baño", self.request_bathroom),
-            ("💊 Pedir Analgésicos", self.request_painkiller),
+            ("💊 Pedir Analgésicos", self.ask_for_painkiller),
             ("📞 Llamar Enfermera", self.call_nurse),
         ]
         
@@ -293,17 +366,20 @@ class AssistantPage(QWidget):
     def request_bathroom(self):
         QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de baño.\n¡Un enfermero llegará pronto!")
     
-    def request_painkiller(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de analgésicos.\n¡Un enfermero llegará pronto!")
-    
+    def ask_for_painkiller(self):
+        question_page = self.main_window.pages["question"]
+        question_page.set_question("¿Está seguro de que desea pedir un analgésico?")
+        self.switch_page("question")
+
     def call_nurse(self):
         QMessageBox.information(self, "Llamada", "Se ha alertado a una enfermera.\n¡Llegará en unos momentos!")
 
 # ==================== PÁGINA DE REGISTROS ====================
 class RecordsPage(QWidget):
-    def __init__(self, switch_page_callback):
+    def __init__(self, main_window):
         super().__init__()
-        self.switch_page = switch_page_callback
+        self.main_window = main_window
+        self.switch_page = self.main_window.switch_page
         self.init_ui()
     
     def init_ui(self):
@@ -362,6 +438,56 @@ class RecordsPage(QWidget):
             """
         self.records_text.setHtml(text)
 
+# ==================== PÁGINA DE PREGUNTAS ====================
+class QuestionPage(QWidget):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.switch_page = self.main_window.switch_page
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 50, 50, 50)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.question_label = QLabel("¿Pregunta de ejemplo?")
+        self.question_label.setObjectName("subtitle")
+        self.question_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.question_label)
+
+        layout.addSpacing(30)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(40)
+
+        self.yes_button = QPushButton("👍 Sí")
+        self.yes_button.setObjectName("btnSuccess")
+        self.yes_button.setFixedHeight(80)
+        self.yes_button.clicked.connect(self.answer_yes)
+        button_layout.addWidget(self.yes_button)
+
+        self.no_button = QPushButton("👎 No")
+        self.no_button.setObjectName("btnDanger")
+        self.no_button.setFixedHeight(80)
+        self.no_button.clicked.connect(self.answer_no)
+        button_layout.addWidget(self.no_button)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def set_question(self, question):
+        self.question_label.setText(question)
+
+    def answer_yes(self):
+        QMessageBox.information(self, "Respuesta", "Has respondido que SÍ.")
+        self.switch_page("menu")
+
+    def answer_no(self):
+        QMessageBox.warning(self, "Respuesta", "Has respondido que NO.")
+        self.switch_page("menu")
+
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -369,22 +495,85 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("NeuroLink - Sistema de Gestión Neurológica")
         self.setGeometry(100, 100, 1000, 700)
         self.setStyleSheet(STYLE_SHEET)
-        
+
         # Stack widget para cambiar entre páginas
         self.stacked_widget = QStackedWidget()
-        
+
         self.pages = {
-            "menu": MainMenuPage(self.switch_page),
-            "register": RegisterPage(self.switch_page),
-            "assistant": AssistantPage(self.switch_page),
-            "records": RecordsPage(self.switch_page),
+            "menu": MainMenuPage(self),
+            "register": RegisterPage(self),
+            "assistant": AssistantPage(self),
+            "records": RecordsPage(self),
+            "question": QuestionPage(self),
         }
-        
+
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)
-        
+
         self.setCentralWidget(self.stacked_widget)
+        self.selected_button = None
+        self.fist_cooldown_timer = QTimer()
+        self.fist_cooldown_timer.setSingleShot(True)
     
+    def handle_gesture(self, gesture_type, data):
+        if gesture_type == "hover":
+            self.handle_hover_gesture(data["x"], data["y"])
+        elif gesture_type == "fist":
+            self.handle_fist_gesture()
+        elif gesture_type == "swipe":
+            self.handle_swipe_gesture(data["direction"])
+        elif gesture_type == "thumb":
+            self.handle_thumb_gesture(data["direction"])
+
+    def handle_hover_gesture(self, x, y):
+        screen_width = QApplication.primaryScreen().size().width()
+        screen_height = QApplication.primaryScreen().size().height()
+        
+        global_x = int(np.interp(x, [0, 640], [0, screen_width]))
+        global_y = int(np.interp(y, [0, 480], [0, screen_height]))
+
+        widget = QApplication.widgetAt(QPoint(global_x, global_y))
+
+        button = None
+        if isinstance(widget, QPushButton):
+            button = widget
+        elif widget and isinstance(widget.parent(), QPushButton):
+            button = widget.parent()
+
+        if self.selected_button and self.selected_button != button:
+            self.selected_button.setProperty("selected", False)
+            self.selected_button.style().unpolish(self.selected_button)
+            self.selected_button.style().polish(self.selected_button)
+
+        self.selected_button = button
+        if self.selected_button:
+            self.selected_button.setProperty("selected", True)
+            self.selected_button.style().unpolish(self.selected_button)
+            self.selected_button.style().polish(self.selected_button)
+
+    def handle_fist_gesture(self):
+        if self.selected_button and not self.fist_cooldown_timer.isActive():
+            self.selected_button.click()
+            self.fist_cooldown_timer.start(1000)  # 1 second cooldown
+
+    def handle_swipe_gesture(self, direction):
+        current_index = self.stacked_widget.currentIndex()
+        if direction == "left":
+            new_index = (current_index - 1) % self.stacked_widget.count()
+            self.stacked_widget.setCurrentIndex(new_index)
+        elif direction == "right":
+            new_index = (current_index + 1) % self.stacked_widget.count()
+            self.stacked_widget.setCurrentIndex(new_index)
+
+    def handle_thumb_gesture(self, direction):
+        current_page = self.stacked_widget.currentWidget()
+        if isinstance(current_page, QuestionPage):
+            if direction == "up":
+                current_page.yes_button.click()
+            elif direction == "down":
+                current_page.no_button.click()
+
+
     def switch_page(self, page_name):
         if page_name == "records":
             self.pages["records"].load_records()
@@ -393,6 +582,14 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     create_patient_table()
     app = QApplication([])
-    window = MainWindow()
-    window.show()
+    
+    main_window = MainWindow()
+    camera_window = CameraWindow()
+    
+    # Conectar la señal de gestos de la cámara al manejador de la ventana principal
+    camera_window.gesture_detected.connect(main_window.handle_gesture)
+    
+    main_window.show()
+    camera_window.show()
+    
     app.exec()
