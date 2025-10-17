@@ -47,18 +47,54 @@ class HandDetector:
 
     def fingers_up(self):
         fingers = []
-        # Thumb
-        if self.lm_list[self.tip_ids[0]][1] < self.lm_list[self.tip_ids[0] - 1][1]:
+        if not self.lm_list:
+            return []
+
+        # Thumb: Check if the tip is above the second joint (from bottom)
+        if self.lm_list[self.tip_ids[0]][2] < self.lm_list[self.tip_ids[0] - 2][2]:
             fingers.append(1)
         else:
             fingers.append(0)
-        # 4 Fingers
+
+        # 4 Fingers: Check if the tip is above the joint two landmarks below
         for id in range(1, 5):
             if self.lm_list[self.tip_ids[id]][2] < self.lm_list[self.tip_ids[id] - 2][2]:
                 fingers.append(1)
             else:
                 fingers.append(0)
         return fingers
+
+    def detect_thumb_gesture(self):
+        if not self.lm_list:
+            return None
+
+        fingers = self.fingers_up()
+        if not fingers:
+            return None
+
+        # Thumbs up: [1, 0, 0, 0, 0]
+        if fingers == [1, 0, 0, 0, 0]:
+            self.gesture = "Thumbs Up"
+            return "thumbs_up"
+        
+        # Thumbs down: Thumb is down, other fingers are closed.
+        is_thumb_down = self.lm_list[self.tip_ids[0]][2] > self.lm_list[self.tip_ids[0] - 1][2]
+        other_fingers_closed = all(f == 0 for f in fingers[1:])
+
+        if is_thumb_down and other_fingers_closed and fingers[0] == 0:
+            self.gesture = "Thumbs Down"
+            return "thumbs_down"
+        return None
+
+    def is_open_hand(self):
+        if not self.lm_list:
+            return False
+
+        fingers = self.fingers_up()
+        if fingers == [1, 1, 1, 1, 1]:
+            self.gesture = "Open Hand"
+            return True
+        return False
 
     def detect_swipe(self):
         if not self.lm_list or sum(self.fingers_up()) != 5:  # Ensure the hand is open

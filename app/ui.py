@@ -1,22 +1,32 @@
 import cv2
 import numpy as np
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QTextEdit, QStackedWidget, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QStackedWidget
 from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal
-from PyQt6.QtGui import QFont, QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from app.vision import HandDetector
-from .database import create_patient_table, insert_patient, get_all_patients, update_patient_urgency
+from .database import create_patient_table
 
-class CameraWindow(QWidget):
+import configparser
+
+class CameraWidget(QWidget):
     gesture_detected = pyqtSignal(str, object)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Cámara de Gestos")
-        self.setGeometry(1150, 100, 320, 240)
+
+        # Leer configuración
+        config = configparser.ConfigParser()
+        config.read("config.ini")
+        
+        max_hands = config.getint("GestureDetection", "MaxHands", fallback=1)
+        min_detection_confidence = config.getfloat("GestureDetection", "MinDetectionConfidence", fallback=0.8)
+        min_tracking_confidence = config.getfloat("GestureDetection", "MinTrackingConfidence", fallback=0.8)
 
         # Configuración de la cámara y detector de manos
         self.cap = cv2.VideoCapture(0)
-        self.detector = HandDetector(detection_con=0.8, max_hands=1)
+        self.detector = HandDetector(max_hands=max_hands, 
+                                     detection_con=min_detection_confidence, 
+                                     track_con=min_tracking_confidence)
 
         # Etiqueta para mostrar el video
         self.camera_label = QLabel()
@@ -38,7 +48,12 @@ class CameraWindow(QWidget):
         lm_list = self.detector.find_position(img)
 
         if len(lm_list) != 0:
-            if self.detector.is_fist():
+            thumb_gesture = self.detector.detect_thumb_gesture()
+            if thumb_gesture:
+                self.gesture_detected.emit(thumb_gesture, {})
+            elif self.detector.is_open_hand():
+                self.gesture_detected.emit("back", {})
+            elif self.detector.is_fist():
                 self.gesture_detected.emit("fist", {})
             else:
                 hover_pos = self.detector.get_hover_position()
@@ -148,380 +163,103 @@ STYLE_SHEET = """
     }
 """
 
-# ==================== PÁGINA PRINCIPAL ====================
-class MainMenuPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 60, 40, 60)
-        
-        # Logo/Título
-        title = QLabel("NeuroLink")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold))
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Sistema Integrado de Gestión Neurológica")
-        subtitle.setObjectName("subtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
-        
-        layout.addSpacing(40)
-        
-        # Botones principales
-        btn_register = QPushButton("📋 Auto-Registro y Triaje")
-        btn_register.setFixedHeight(60)
-        btn_register.setFont(QFont("Segoe UI", 14))
-        btn_register.clicked.connect(lambda: self.switch_page("triage"))
-        layout.addWidget(btn_register)
-        
-        btn_assistant = QPushButton("🏥 Asistente de Paciente")
-        btn_assistant.setFixedHeight(60)
-        btn_assistant.setFont(QFont("Segoe UI", 14))
-        btn_assistant.clicked.connect(lambda: self.switch_page("assistant"))
-        layout.addWidget(btn_assistant)
-        
-        btn_records = QPushButton("📊 Registros de Pacientes")
-        btn_records.setFixedHeight(60)
-        btn_records.setFont(QFont("Segoe UI", 14))
-        btn_records.clicked.connect(lambda: self.switch_page("records"))
-        layout.addWidget(btn_records)
-        
-        layout.addStretch()
-        
-        self.setLayout(layout)
-
-# ==================== PÁGINA DE TRIAJE (CUESTIONARIO) ====================
-class TriagePage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.questions = [
-            "¿Tiene fiebre alta (más de 38°C)?",
-            "¿Tiene dificultad para respirar?",
-            "¿Siente dolor en el pecho?",
-            "¿Ha perdido el conocimiento en las últimas 24 horas?",
-            "¿Tiene algún sangrado inusual?"
-        ]
-        self.answers = []
-        self.current_question_index = 0
-        self.init_ui()
-
-    def init_ui(self):
-        self.layout = QVBoxLayout()
-        self.layout.setSpacing(20)
-        self.layout.setContentsMargins(50, 50, 50, 50)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.question_label = QLabel()
-        self.question_label.setObjectName("subtitle")
-        self.question_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(self.question_label)
-
-        self.layout.addSpacing(30)
-
-        self.button_layout = QHBoxLayout()
-        self.button_layout.setSpacing(40)
-
-        self.yes_button = QPushButton("👍 Sí")
-        self.yes_button.setObjectName("btnSuccess")
-        self.yes_button.setFixedHeight(80)
-        self.yes_button.clicked.connect(self.answer_yes)
-        self.button_layout.addWidget(self.yes_button)
-
-        self.no_button = QPushButton("👎 No")
-        self.no_button.setObjectName("btnDanger")
-        self.no_button.setFixedHeight(80)
-        self.no_button.clicked.connect(self.answer_no)
-        self.button_layout.addWidget(self.no_button)
-
-        self.layout.addLayout(self.button_layout)
-        
-        self.confirm_button = QPushButton("✓ Confirmar Cita")
-        self.confirm_button.setObjectName("btnSuccess")
-        self.confirm_button.setFixedHeight(60)
-        self.confirm_button.clicked.connect(self.confirm_appointment)
-        self.confirm_button.hide()
-        self.layout.addWidget(self.confirm_button)
-
-        self.setLayout(self.layout)
-        self.show_question()
-
-    def show_question(self):
-        if self.current_question_index < len(self.questions):
-            self.question_label.setText(self.questions[self.current_question_index])
-            self.yes_button.show()
-            self.no_button.show()
-            self.confirm_button.hide()
-        else:
-            self.question_label.setText("Cuestionario completado. ¿Desea confirmar la cita?")
-            self.yes_button.hide()
-            self.no_button.hide()
-            self.confirm_button.show()
-
-    def answer(self, answer):
-        self.answers.append(answer)
-        self.next_question()
-
-    def answer_yes(self):
-        self.answer(True)
-
-    def answer_no(self):
-        self.answer(False)
-
-    def next_question(self):
-        self.current_question_index += 1
-        self.show_question()
-
-    def previous_question(self):
-        if self.current_question_index > 0:
-            self.current_question_index -= 1
-            self.answers.pop()
-            self.show_question()
-
-    def confirm_appointment(self):
-        urgency = "Urgente" if any(self.answers) else "No Urgente"
-        symptoms = "Respuestas del cuestionario: " + str(self.answers)
-        # For now, let's use a generic name and age
-        if insert_patient("Paciente de Triaje", 30, symptoms, urgency):
-            QMessageBox.information(self, "Éxito", f"¡Cita confirmada! Su nivel de urgencia es: {urgency}")
-            self.reset()
-            self.switch_page("menu")
-        else:
-            QMessageBox.critical(self, "Error", "No se pudo confirmar la cita.")
-
-    def reset(self):
-        self.answers = []
-        self.current_question_index = 0
-        self.show_question()
-
-# ==================== PÁGINA ASISTENTE ====================
-class AssistantPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # Header
-        header = QHBoxLayout()
-        back_btn = QPushButton("← Atrás")
-        back_btn.setObjectName("btnSecondary")
-        back_btn.setMaximumWidth(100)
-        back_btn.clicked.connect(lambda: self.switch_page("menu") )
-        header.addWidget(back_btn)
-        header.addStretch()
-        layout.addLayout(header)
-        
-        # Título
-        title = QLabel("Asistente de Paciente")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Seleccione una opción para continuar")
-        subtitle.setObjectName("subtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
-        
-        layout.addSpacing(20)
-        
-        # Botones de solicitud
-        buttons = [
-            ("💧 Pedir Agua", self.request_water),
-            ("🚽 Pedir Baño", self.request_bathroom),
-            ("💊 Pedir Analgésicos", self.ask_for_painkiller),
-            ("📞 Llamar Enfermera", self.call_nurse),
-        ]
-        
-        for text, callback in buttons:
-            btn = QPushButton(text)
-            btn.setFixedHeight(70)
-            btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-            btn.clicked.connect(callback)
-            layout.addWidget(btn)
-        
-        layout.addStretch()
-        self.setLayout(layout)
-    
-    def request_water(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de agua.\n¡Un enfermero llegará pronto!")
-    
-    def request_bathroom(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de baño.\n¡Un enfermero llegará pronto!")
-    
-    def ask_for_painkiller(self):
-        question_page = self.main_window.pages["question"]
-        question_page.set_question("¿Está seguro de que desea pedir un analgésico?")
-        self.switch_page("question")
-
-    def call_nurse(self):
-        QMessageBox.information(self, "Llamada", "Se ha alertado a una enfermera.\n¡Llegará en unos momentos!")
-
-# ==================== PÁGINA DE REGISTROS ====================
-class RecordsPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # Header
-        header = QHBoxLayout()
-        back_btn = QPushButton("← Atrás")
-        back_btn.setObjectName("btnSecondary")
-        back_btn.setMaximumWidth(100)
-        back_btn.clicked.connect(lambda: self.switch_page("menu") )
-        header.addWidget(back_btn)
-        header.addStretch()
-        layout.addLayout(header)
-        
-        # Título
-        title = QLabel("Registros de Pacientes")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        
-        layout.addSpacing(10)
-        
-        # Área de registros
-        self.records_text = QTextEdit()
-        self.records_text.setReadOnly(True)
-        self.records_text.setStyleSheet("background-color: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 15px;")
-        layout.addWidget(self.records_text)
-        
-        # Botón refresh
-        btn_refresh = QPushButton("🔄 Actualizar")
-        btn_refresh.setFixedHeight(40)
-        btn_refresh.clicked.connect(self.load_records)
-        layout.addWidget(btn_refresh)
-        
-        self.load_records()
-        self.setLayout(layout)
-    
-    def load_records(self):
-        patients = get_all_patients()
-        if not patients:
-            self.records_text.setText("No hay registros de pacientes aún.")
-            return
-        
-        text = "<b style='color: #3b82f6; font-size: 14px;'>REGISTROS DE PACIENTES</b><br><br>"
-        for i, patient in enumerate(patients, 1):
-            urgency_color = "#ef4444" if patient[4] == "Urgente" else "#10b981"
-            text += "<div style='background-color: #0f172a; padding: 12px; margin: 8px 0; border-left: 4px solid " + urgency_color + "; border-radius: 4px;'>"
-            text += f"<b>#{i} - {patient[1]}</b> | Edad: {patient[2]} | {patient[5]}<br>"
-            text += f"Síntomas: {patient[3]}<br>"
-            text += f"Urgencia: <span style='color: {urgency_color}; font-weight: bold;'>{patient[4]}</span>"
-            text += "</div>"
-        self.records_text.setHtml(text)
-
-# ==================== PÁGINA DE PREGUNTAS ====================
-class QuestionPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(50, 50, 50, 50)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.question_label = QLabel("¿Pregunta de ejemplo?")
-        self.question_label.setObjectName("subtitle")
-        self.question_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.question_label)
-
-        layout.addSpacing(30)
-
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(40)
-
-        self.yes_button = QPushButton("👍 Sí")
-        self.yes_button.setObjectName("btnSuccess")
-        self.yes_button.setFixedHeight(80)
-        self.yes_button.clicked.connect(self.answer_yes)
-        button_layout.addWidget(self.yes_button)
-
-        self.no_button = QPushButton("👎 No")
-        self.no_button.setObjectName("btnDanger")
-        self.no_button.setFixedHeight(80)
-        self.no_button.clicked.connect(self.answer_no)
-        button_layout.addWidget(self.no_button)
-
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-
-    def set_question(self, question):
-        self.question_label.setText(question)
-
-    def answer_yes(self):
-        QMessageBox.information(self, "Respuesta", "Has respondido que SÍ.")
-        self.switch_page("menu")
-
-    def answer_no(self):
-        QMessageBox.warning(self, "Respuesta", "Has respondido que NO.")
-        self.switch_page("menu")
+# ==================== PÁGINAS ====================
+from .pages.main_menu import MainMenuPage
+from .pages.triage import TriagePage
+from .pages.assistant import AssistantPage
+from .pages.records import RecordsPage
+from .pages.question import QuestionPage
+from .pages.help import HelpPage
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroLink - Sistema de Gestión Neurológica")
-        self.setGeometry(100, 100, 1000, 700)
+        self.setGeometry(100, 100, 1300, 700) # Adjusted width for the camera view
         self.setStyleSheet(STYLE_SHEET)
 
-        # Stack widget para cambiar entre páginas
+        # Layout principal
+        main_layout = QHBoxLayout()
+        
+        # Stack widget para cambiar entre páginas (ocupa el 70% del espacio)
         self.stacked_widget = QStackedWidget()
-
         self.pages = {
             "menu": MainMenuPage(self),
             "triage": TriagePage(self),
             "assistant": AssistantPage(self),
             "records": RecordsPage(self),
             "question": QuestionPage(self),
+            "help": HelpPage(self),
         }
-
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)
+        
+        # Widget de la cámara (ocupa el 30% del espacio)
+        self.camera_widget = CameraWidget()
+        self.camera_widget.gesture_detected.connect(self.handle_gesture)
 
-        self.setCentralWidget(self.stacked_widget)
+        main_layout.addWidget(self.stacked_widget, 7) # 70%
+        main_layout.addWidget(self.camera_widget, 3) # 30%
+
+        # Widget central
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
         self.selected_button = None
         self.fist_cooldown_timer = QTimer()
         self.fist_cooldown_timer.setSingleShot(True)
         self.gesture_cooldown_timer = QTimer()
         self.gesture_cooldown_timer.setSingleShot(True)
+
+        # Feedback label for gestures
+        self.feedback_label = QLabel(self)
+        self.feedback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.feedback_label.setStyleSheet("background-color: rgba(0, 0, 0, 0.6); color: white; font-size: 48px; border-radius: 10px; padding: 10px;")
+        self.feedback_label.hide()
+
+        self.feedback_timer = QTimer(self)
+        self.feedback_timer.setSingleShot(True)
+        self.feedback_timer.timeout.connect(self.feedback_label.hide)
+    
+    def show_feedback(self, text):
+        self.feedback_label.setText(text)
+        self.feedback_label.adjustSize()
+        # Center it
+        self.feedback_label.move(int((self.width() - self.feedback_label.width()) / 2), int((self.height() - self.feedback_label.height()) / 2))
+        self.feedback_label.show()
+        self.feedback_label.raise_()
+        self.feedback_timer.start(500) # Hide after 500ms
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.feedback_label.move(int((self.width() - self.feedback_label.width()) / 2), int((self.height() - self.feedback_label.height()) / 2))
     
     def handle_gesture(self, gesture_type, data):
         if self.gesture_cooldown_timer.isActive():
             return
 
         if gesture_type == "hover":
+            # No feedback for hover as it's continuous
             self.handle_hover_gesture(data["x"], data["y"])
         elif gesture_type == "fist":
+            self.show_feedback("👊")
             self.handle_fist_gesture()
         elif gesture_type == "swipe":
+            if data["direction"] == "left":
+                self.show_feedback("⬅️")
+            else:
+                self.show_feedback("➡️")
             self.handle_swipe_gesture(data["direction"])
+        elif gesture_type == "thumbs_up":
+            self.show_feedback("👍")
+            self.handle_thumbs_up_gesture()
+        elif gesture_type == "thumbs_down":
+            self.show_feedback("👎")
+            self.handle_thumbs_down_gesture()
+        elif gesture_type == "back":
+            self.show_feedback("🤚")
+            self.handle_back_gesture()
         
         self.gesture_cooldown_timer.start(500)
 
@@ -553,17 +291,7 @@ class MainWindow(QMainWindow):
 
     def handle_fist_gesture(self):
         if self.selected_button and not self.fist_cooldown_timer.isActive():
-            current_page = self.stacked_widget.currentWidget()
-            if isinstance(current_page, TriagePage):
-                if self.selected_button == current_page.yes_button:
-                    current_page.answer_yes()
-                elif self.selected_button == current_page.no_button:
-                    current_page.answer_no()
-                else:
-                    self.selected_button.click()
-            else:
-                self.selected_button.click()
-            
+            self.selected_button.click()
             self.fist_cooldown_timer.start(1000)  # 1 second cooldown
 
     def handle_swipe_gesture(self, direction):
@@ -582,6 +310,20 @@ class MainWindow(QMainWindow):
                 new_index = (current_index + 1) % self.stacked_widget.count()
                 self.stacked_widget.setCurrentIndex(new_index)
 
+    def handle_thumbs_up_gesture(self):
+        current_page = self.stacked_widget.currentWidget()
+        if isinstance(current_page, (TriagePage, QuestionPage)):
+            current_page.answer_yes()
+
+    def handle_thumbs_down_gesture(self):
+        current_page = self.stacked_widget.currentWidget()
+        if isinstance(current_page, (TriagePage, QuestionPage)):
+            current_page.answer_no()
+
+    def handle_back_gesture(self):
+        if self.stacked_widget.currentWidget() != self.pages["menu"]:
+            self.switch_page("menu")
+
     def switch_page(self, page_name):
         if page_name == "records":
             self.pages["records"].load_records()
@@ -596,12 +338,6 @@ if __name__ == "__main__":
     app = QApplication([])
     
     main_window = MainWindow()
-    camera_window = CameraWindow()
-    
-    # Conectar la señal de gestos de la cámara al manejador de la ventana principal
-    camera_window.gesture_detected.connect(main_window.handle_gesture)
-    
     main_window.show()
-    camera_window.show()
     
     app.exec()
