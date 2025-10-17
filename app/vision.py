@@ -3,7 +3,7 @@ import mediapipe as mp
 import numpy as np
 
 class HandDetector:
-    def __init__(self, max_hands=1, detection_con=0.7, track_con=0.7):
+    def __init__(self, max_hands=1, detection_con=0.85, track_con=0.85):
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(max_num_hands=max_hands,
                                           min_detection_confidence=detection_con,
@@ -89,13 +89,22 @@ class HandDetector:
     def is_fist(self):
         if not self.lm_list:
             return False
-        
-        # Calculate distance between thumb tip and index finger tip
-        x1, y1 = self.lm_list[4][1:]
-        x2, y2 = self.lm_list[8][1:]
-        distance = np.hypot(x2 - x1, y2 - y1)
 
-        if distance < 50:
+        # Calculate the center of the palm
+        palm_center_x = self.lm_list[9][1]
+        palm_center_y = self.lm_list[9][2]
+
+        # Calculate the average distance of fingertips to the palm center
+        total_distance = 0
+        for tip_id in self.tip_ids:
+            tip_x, tip_y = self.lm_list[tip_id][1:]
+            distance = np.hypot(tip_x - palm_center_x, tip_y - palm_center_y)
+            total_distance += distance
+        
+        avg_distance = total_distance / len(self.tip_ids)
+
+        # If the average distance is below a certain threshold, it's a fist
+        if avg_distance < 80:  # This threshold might need tuning
             self.click_debounce_counter += 1
             if self.click_debounce_counter >= self.debounce_threshold:
                 self.click_debounce_counter = 0
