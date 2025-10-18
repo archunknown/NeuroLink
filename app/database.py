@@ -87,6 +87,7 @@ def update_patient_urgency(patient_id, urgency):
         print(f"Error al actualizar paciente: {e}")
         return False
 
+
 def delete_patient(patient_id):
     """Eliminar un paciente de la base de datos"""
     try:
@@ -112,3 +113,34 @@ def get_patient_by_dni(dni):
     except Exception as e:
         print(f"Error al obtener paciente por DNI: {e}")
         return None
+
+def get_all_patients_as_dicts():
+    """Obtener todos los pacientes como una lista de diccionarios."""
+    try:
+        conn = connect_db()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT id, dni, nombres, apellido_paterno, apellido_materno, edad, sintomas, urgencia, fecha, direccion, distrito, provincia FROM pacientes ORDER BY fecha DESC")
+        patients = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return patients
+    except Exception as e:
+        print(f"Error al obtener pacientes como dicts: {e}")
+        return []
+
+def execute_query(sql_query, params=()):
+    """Ejecuta una consulta SQL de solo lectura y devuelve los resultados."""
+    if not sql_query.strip().lower().startswith('select'):
+        print(f"Error de seguridad: Se intentó ejecutar una consulta no permitida: {sql_query}")
+        return None, None
+    try:
+        conn = connect_db()
+        c = conn.cursor()
+        c.execute(sql_query, params)
+        headers = [description[0] for description in c.description] if c.description else []
+        rows = c.fetchall()
+        conn.close()
+        return headers, rows
+    except sqlite3.Error as e:
+        print(f"Error al ejecutar la consulta: {e}")
+        return None, None
