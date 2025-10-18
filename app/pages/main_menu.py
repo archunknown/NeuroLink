@@ -31,25 +31,25 @@ class MainMenuPage(QWidget):
         # Botones principales
         btn_register = QPushButton("📋 Auto-Registro y Triaje")
         btn_register.setFixedHeight(60)
-        btn_register.setFont(QFont("Segoe UI", 14))
-        btn_register.clicked.connect(lambda: self.switch_page("triage"))
+        btn_register.setFont(QFont("Segoe UI", 12))
+        btn_register.clicked.connect(lambda: self.switch_page("dni_input"))
         layout.addWidget(btn_register)
         
         btn_assistant = QPushButton("🏥 Asistente de Paciente")
         btn_assistant.setFixedHeight(60)
-        btn_assistant.setFont(QFont("Segoe UI", 14))
+        btn_assistant.setFont(QFont("Segoe UI", 12))
         btn_assistant.clicked.connect(lambda: self.switch_page("assistant"))
         layout.addWidget(btn_assistant)
         
         btn_records = QPushButton("📊 Registros de Pacientes")
         btn_records.setFixedHeight(60)
-        btn_records.setFont(QFont("Segoe UI", 14))
+        btn_records.setFont(QFont("Segoe UI", 12))
         btn_records.clicked.connect(lambda: self.switch_page("records"))
         layout.addWidget(btn_records)
 
         btn_help = QPushButton("❔ Ayuda")
         btn_help.setFixedHeight(60)
-        btn_help.setFont(QFont("Segoe UI", 14))
+        btn_help.setFont(QFont("Segoe UI", 12))
         btn_help.clicked.connect(lambda: self.switch_page("help"))
         layout.addWidget(btn_help)
         

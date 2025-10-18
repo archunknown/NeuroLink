@@ -55,10 +55,14 @@ class RecordsPage(QWidget):
         
         text = "<b style='color: #3b82f6; font-size: 14px;'>REGISTROS DE PACIENTES</b><br><br>"
         for i, patient in enumerate(patients, 1):
-            urgency_color = "#ef4444" if patient[4] == "Urgente" else "#10b981"
+            # Nuevos índices: 1:dni, 2:nombres, 3:paterno, 4:materno, 5:edad, 6:sintomas, 7:urgencia, 8:fecha
+            full_name = f"{patient[2]} {patient[3]} {patient[4]}".strip()
+            urgency_color = "#ef4444" if patient[7] == "Alta" else "#10b981"
+            
             text += "<div style='background-color: #0f172a; padding: 12px; margin: 8px 0; border-left: 4px solid " + urgency_color + "; border-radius: 4px;'>"
-            text += f"<b>#{i} - {patient[1]}</b> | Edad: {patient[2]} | {patient[5]}<br>"
-            text += f"Síntomas: {patient[3]}<br>"
-            text += f"Urgencia: <span style='color: {urgency_color}; font-weight: bold;'>{patient[4]}</span>"
+            text += f"<b>#{i} - {full_name}</b> (DNI: {patient[1]})<br>"
+            text += f"Edad: {patient[5]} | Fecha: {patient[8]}<br>"
+            text += f"Síntomas: {patient[6]}<br>"
+            text += f"Urgencia: <span style='color: {urgency_color}; font-weight: bold;'>{patient[7]}</span>"
             text += "</div>"
         self.records_text.setHtml(text)
