@@ -28,16 +28,11 @@ class HandDetector:
         self.swipe_cooldown = 0
         self.swipe_threshold = 150  # More deliberate
         
-        # Fist/Click detection - SEPARATED from other gestures
-        self.fist_frames = 0
-        self.fist_threshold = 5  # Reduced for faster response
-        self.fist_distance_threshold = 75
-        self.fist_cooldown = 0  # Separate cooldown for clicks
+        # Four fingers click detection (thumb closed, 4 fingers extended)
+        self.four_fingers_frames = 0
+        self.four_fingers_threshold = 5  # Reduced for faster response
+        self.four_fingers_cooldown = 0  # Separate cooldown for clicks
         
-        # Thumb gesture detection
-        self.thumb_frames = {"up": 0, "down": 0}
-        self.thumb_threshold = 8
-        self.thumb_cooldown = 0
         
         # Peace/V gesture (better for back navigation)
         self.peace_frames = 0
@@ -87,15 +82,6 @@ class HandDetector:
                             0.6, (255, 255, 0), 2
                         )
                         
-                        # Show fist distance for debugging
-                        palm_center = self.lm_list[9][1:]
-                        avg_dist = self._calculate_avg_fingertip_distance(palm_center)
-                        cv2.putText(
-                            img, f'Fist: {int(avg_dist)}', 
-                            (10, 140), cv2.FONT_HERSHEY_SIMPLEX, 
-                            0.6, (255, 100, 100), 2
-                        )
-                        
                         # Draw cursor position indicator
                         if self.is_pointing() or self.is_hovering:
                             index_tip = self.lm_list[8]
@@ -105,10 +91,8 @@ class HandDetector:
         # Decrease cooldowns
         if self.swipe_cooldown > 0:
             self.swipe_cooldown -= 1
-        if self.fist_cooldown > 0:
-            self.fist_cooldown -= 1
-        if self.thumb_cooldown > 0:
-            self.thumb_cooldown -= 1
+        if self.four_fingers_cooldown > 0:
+            self.four_fingers_cooldown -= 1
         if self.peace_cooldown > 0:
             self.peace_cooldown -= 1
             
@@ -171,52 +155,6 @@ class HandDetector:
             
         return self.pointing_frames > 2  # Stable for 2 frames
 
-    def detect_thumb_gesture(self):
-        """Detect thumbs up or thumbs down with temporal filtering"""
-        if not self.lm_list or self.thumb_cooldown > 0:
-            return None
-
-        fingers = self.fingers_up()
-        if not fingers:
-            return None
-
-        # Check if only thumb is extended
-        other_fingers_closed = all(f == 0 for f in fingers[1:])
-        
-        if not other_fingers_closed:
-            self.thumb_frames = {"up": 0, "down": 0}
-            return None
-
-        thumb_tip = self.lm_list[self.tip_ids[0]]
-        wrist = self.lm_list[0]
-        
-        # Thumbs up
-        if thumb_tip[2] < wrist[2] - 50 and fingers[0] == 1:
-            self.thumb_frames["up"] += 1
-            self.thumb_frames["down"] = 0
-            
-            if self.thumb_frames["up"] >= self.thumb_threshold:
-                self.gesture = "Thumbs Up ✓"
-                self.gesture_state = "gesturing"
-                self.thumb_cooldown = 20
-                self.thumb_frames = {"up": 0, "down": 0}
-                return "thumbs_up"
-        
-        # Thumbs down
-        elif thumb_tip[2] > wrist[2] + 50 and fingers[0] == 1:
-            self.thumb_frames["down"] += 1
-            self.thumb_frames["up"] = 0
-            
-            if self.thumb_frames["down"] >= self.thumb_threshold:
-                self.gesture = "Thumbs Down ✗"
-                self.gesture_state = "gesturing"
-                self.thumb_cooldown = 20
-                self.thumb_frames = {"up": 0, "down": 0}
-                return "thumbs_down"
-        else:
-            self.thumb_frames = {"up": 0, "down": 0}
-        
-        return None
 
     def detect_peace_sign(self):
         """Detect peace/V sign (index and middle up) - Better for back navigation"""
@@ -242,38 +180,27 @@ class HandDetector:
             
         return False
 
-    def _calculate_avg_fingertip_distance(self, palm_center):
-        """Calculate average distance of fingertips to palm center"""
-        total_distance = 0
-        for tip_id in self.tip_ids:
-            tip_x, tip_y = self.lm_list[tip_id][1:]
-            distance = np.hypot(tip_x - palm_center[0], tip_y - palm_center[1])
-            total_distance += distance
-        return total_distance / len(self.tip_ids)
-
     def is_fist(self):
-        """Detect fist gesture - OPTIMIZED for clicking"""
-        if not self.lm_list or self.fist_cooldown > 0:
+        """Detect four fingers extended (thumb closed) gesture for clicking"""
+        if not self.lm_list or self.four_fingers_cooldown > 0:
             return False
 
-        palm_center = self.lm_list[9][1:]
-        avg_distance = self._calculate_avg_fingertip_distance(palm_center)
-        
         fingers = self.fingers_up()
-        all_fingers_down = sum(fingers) <= 1  # Allow thumb to be slightly up
         
-        # More lenient for better click detection
-        if avg_distance < self.fist_distance_threshold and all_fingers_down:
-            self.fist_frames += 1
+        # Check: thumb closed (0) and all 4 other fingers extended (1)
+        is_four_fingers = fingers == [0, 1, 1, 1, 1]
+        
+        if is_four_fingers:
+            self.four_fingers_frames += 1
             
-            if self.fist_frames >= self.fist_threshold:
-                self.gesture = "Fist Click! 👊"
+            if self.four_fingers_frames >= self.four_fingers_threshold:
+                self.gesture = "Four Fingers Click! 🖐"
                 self.gesture_state = "clicking"
-                self.fist_cooldown = 15  # Cooldown after click
-                self.fist_frames = 0
+                self.four_fingers_cooldown = 15  # Cooldown after click
+                self.four_fingers_frames = 0
                 return True
         else:
-            self.fist_frames = 0
+            self.four_fingers_frames = 0
         
         return False
 
@@ -285,8 +212,8 @@ class HandDetector:
 
         fingers = self.fingers_up()
         
-        # Only detect swipe with open hand (at least 4 fingers)
-        if sum(fingers) < 4:
+        # Only detect swipe with all 5 fingers extended (open hand)
+        if sum(fingers) != 5:
             self.hand_positions.clear()
             return None
 
@@ -333,12 +260,11 @@ class HandDetector:
         fingers = self.fingers_up()
         
         # Allow hover with pointing gesture or normal hand position
-        # Don't hover when making other gestures (fist, peace, thumb, swipe)
+        # Don't hover when making other gestures (four fingers, peace, thumb, swipe)
         is_gesture = (
-            sum(fingers) == 0 or  # Fist
-            fingers == [1, 0, 0, 0, 0] or  # Thumb only
+            fingers == [0, 1, 1, 1, 1] or  # Four fingers (click)
             fingers == [0, 1, 1, 0, 0] or  # Peace
-            sum(fingers) >= 4  # Open hand (swipe)
+            sum(fingers) == 5  # Open hand (swipe)
         )
         
         if is_gesture and not self.is_pointing():
