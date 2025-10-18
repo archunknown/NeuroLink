@@ -5,6 +5,11 @@ from collections import deque
 
 class HandDetector:
     def __init__(self, max_hands=1, detection_con=0.85, track_con=0.85):
+        import os, sys
+        base_dir = getattr(sys, '_MEIPASS', os.path.abspath("."))
+        mp_path = os.path.join(base_dir, "mediapipe", "modules")
+        os.environ["MEDIAPIPE_MODEL_PATH"] = mp_path
+
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             max_num_hands=max_hands,

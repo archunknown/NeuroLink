@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEasingCurve, QThread, QObject
 from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen
 from app.vision import HandDetector
-from .database import create_patient_table
+from app.database import create_patient_table
 
 import configparser
 import os
@@ -144,7 +144,6 @@ class CameraWidget(QWidget):
             if self.detector.detect_peace_sign():
                 self.gesture_detected.emit("peace", {})
             
-
             
             # Check swipe gestures
             swipe_gesture = self.detector.detect_swipe()
@@ -252,17 +251,17 @@ STYLE_SHEET = """
 """
 
 # ==================== PÁGINAS ====================
-from .pages.main_menu import MainMenuPage
-from .pages.triage import TriagePage
-from .pages.assistant import AssistantPage
-from .pages.records import RecordsPage
-from .pages.question import QuestionPage
-from .pages.help import HelpPage
-from .pages.dni_input import DniInputPage
-from .pages.report import ReportPage
-from .pages.natural_query import NaturalQueryPage
+from app.pages.main_menu import MainMenuPage
+from app.pages.triage import TriagePage
+from app.pages.assistant import AssistantPage
+from app.pages.records import RecordsPage
+from app.pages.question import QuestionPage
+from app.pages.help import HelpPage
+from app.pages.dni_input import DniInputPage
+from app.pages.report import ReportPage
+from app.pages.natural_query import NaturalQueryPage
 
-from .database import execute_query
+from app.database import execute_query
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
