@@ -260,6 +260,9 @@ from .pages.question import QuestionPage
 from .pages.help import HelpPage
 from .pages.dni_input import DniInputPage
 from .pages.report import ReportPage
+from .pages.natural_query import NaturalQueryPage
+
+from .database import execute_query
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
@@ -283,6 +286,7 @@ class MainWindow(QMainWindow):
             "question": QuestionPage(self),
             "help": HelpPage(self),
             "report": ReportPage(self),
+            "natural_query": NaturalQueryPage(self),
         }
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)

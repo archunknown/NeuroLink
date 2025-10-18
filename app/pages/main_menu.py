@@ -47,6 +47,12 @@ class MainMenuPage(QWidget):
         btn_records.clicked.connect(lambda: self.switch_page("records"))
         layout.addWidget(btn_records)
 
+        btn_natural_query = QPushButton("🤖 Consulta IA (Text-to-SQL)")
+        btn_natural_query.setFixedHeight(60)
+        btn_natural_query.setFont(QFont("Segoe UI", 12))
+        btn_natural_query.clicked.connect(lambda: self.switch_page("natural_query"))
+        layout.addWidget(btn_natural_query)
+
         btn_help = QPushButton("❔ Ayuda")
         btn_help.setFixedHeight(60)
         btn_help.setFont(QFont("Segoe UI", 12))
