@@ -1,12 +1,44 @@
 import cv2
 import numpy as np
+import requests
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QStackedWidget
-from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEasingCurve, QThread, QObject
 from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen
 from app.vision import HandDetector
 from .database import create_patient_table
 
 import configparser
+import os
+from dotenv import load_dotenv
+
+# ==================== API WORKER ====================
+class DniApiWorker(QObject):
+    """
+    Worker thread to handle DNI API requests without freezing the UI.
+    """
+    finished = pyqtSignal(dict)
+
+    def __init__(self, dni):
+        super().__init__()
+        load_dotenv()
+        self.dni = dni
+        self.api_token = os.getenv("API_TOKEN")
+        self.api_url = f"https://miapi.cloud/v1/dni/{self.dni}"
+
+    def run(self):
+        try:
+            response = requests.get(self.api_url, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=10)
+            if response.status_code == 200:
+                data = response.json().get("datos", {})
+                if data:
+                    self.finished.emit({"success": True, "data": data})
+                else:
+                    self.finished.emit({"success": False, "error": "DNI no encontrado."})
+            else:
+                self.finished.emit({"success": False, "error": f"Error en la API: {response.status_code}"})
+        except requests.RequestException as e:
+            self.finished.emit({"success": False, "error": f"Error de red: {e}"})
+
 
 class VirtualCursor(QWidget):
     """Virtual cursor overlay for visual feedback"""
@@ -229,6 +261,8 @@ from .pages.assistant import AssistantPage
 from .pages.records import RecordsPage
 from .pages.question import QuestionPage
 from .pages.help import HelpPage
+from .pages.dni_input import DniInputPage
+from .pages.report import ReportPage
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
@@ -245,15 +279,20 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         self.pages = {
             "menu": MainMenuPage(self),
+            "dni_input": DniInputPage(self),
             "triage": TriagePage(self),
             "assistant": AssistantPage(self),
             "records": RecordsPage(self),
             "question": QuestionPage(self),
             "help": HelpPage(self),
+            "report": ReportPage(self),
         }
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)
         
+        # Conectar señal de DNI
+        self.pages["dni_input"].dni_submitted.connect(self.start_dni_validation)
+
         # Widget de la cámara
         self.camera_widget = CameraWidget()
         self.camera_widget.gesture_detected.connect(self.handle_gesture)
@@ -285,11 +324,12 @@ class MainWindow(QMainWindow):
         self.feedback_label.setStyleSheet("""
             background-color: rgba(0, 0, 0, 0.8); 
             color: white; 
-            font-size: 64px; 
+            font-size: 48px; 
             border-radius: 15px; 
             padding: 20px;
             font-weight: bold;
-        """)
+        """
+        )
         self.feedback_label.hide()
 
         self.feedback_timer = QTimer(self)
@@ -320,7 +360,58 @@ class MainWindow(QMainWindow):
         self.feedback_label.show()
         self.feedback_label.raise_()
         self.feedback_timer.start(duration)
-    
+
+    def start_dni_validation(self, dni):
+        self.show_feedback("Validando DNI...", 20000) # Show until response
+        self.thread = QThread()
+        self.worker = DniApiWorker(dni)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.on_dni_validation_complete)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+    def on_dni_validation_complete(self, result):
+        self.feedback_timer.stop()
+        self.feedback_label.hide()
+
+        if result["success"]:
+            patient_data = result["data"]
+            # Parse name and address
+            raw_nombres = patient_data.get("nombres", "")
+            paterno = patient_data.get("ape_paterno", "")
+            materno = patient_data.get("ape_materno", "")
+            
+            domiciliado = patient_data.get("domiciliado", {})
+            direccion = domiciliado.get("direccion", "")
+            distrito = domiciliado.get("distrito", "")
+            provincia = domiciliado.get("provincia", "")
+
+            welcome_name = f"{raw_nombres} {paterno} {materno}".strip()
+            self.show_feedback(f"Bienvenido(a)\n{welcome_name}", 2500)
+            
+            # Prepare data for triage page
+            patient_info = {
+                "dni": patient_data.get("dni", ""),
+                "nombres": raw_nombres,
+                "apellido_paterno": paterno,
+                "apellido_materno": materno,
+                "edad": 30, # Placeholder, API doesn't provide age
+                "direccion": direccion,
+                "distrito": distrito,
+                "provincia": provincia
+            }
+            
+            # Proceed to triage after welcome message
+            QTimer.singleShot(2600, lambda: self.switch_page("triage", patient_info=patient_info))
+        else:
+            error_message = result.get("error", "Error desconocido")
+            self.show_feedback(f"Error: {error_message}", 3000)
+            # Reset DNI page to allow re-entry
+            self.pages["dni_input"].reset()
+
     def handle_gesture(self, gesture_type, data):
         # Hover has no cooldown - it's continuous
         if gesture_type == "hover":
@@ -439,15 +530,30 @@ class MainWindow(QMainWindow):
 
     def handle_back_gesture(self):
         """Handle back gesture - Peace sign is more deliberate than open hand"""
-        if self.stacked_widget.currentWidget() != self.pages["menu"]:
+        current_page = self.stacked_widget.currentWidget()
+        if isinstance(current_page, DniInputPage):
+             self.switch_page("menu")
+        elif self.stacked_widget.currentWidget() != self.pages["menu"]:
             self.switch_page("menu")
 
-    def switch_page(self, page_name):
+    def switch_page(self, page_name, **kwargs):
         if page_name == "records":
             self.pages["records"].load_records()
         
         if page_name == "triage":
             self.pages["triage"].reset()
+            if "patient_info" in kwargs:
+                self.pages["triage"].start_triage(kwargs["patient_info"])
+
+        if page_name == "dni_input":
+            self.pages["dni_input"].reset()
+
+        if page_name == "report":
+            self.pages["report"].set_report_data(
+                kwargs.get("patient_info"),
+                kwargs.get("urgency"),
+                kwargs.get("symptoms")
+            )
 
         self.stacked_widget.setCurrentWidget(self.pages[page_name])
 
