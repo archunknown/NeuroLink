@@ -144,10 +144,7 @@ class CameraWidget(QWidget):
             if self.detector.detect_peace_sign():
                 self.gesture_detected.emit("peace", {})
             
-            # Check thumb gestures
-            thumb_gesture = self.detector.detect_thumb_gesture()
-            if thumb_gesture:
-                self.gesture_detected.emit(thumb_gesture, {})
+
             
             # Check swipe gestures
             swipe_gesture = self.detector.detect_swipe()
@@ -434,15 +431,6 @@ class MainWindow(QMainWindow):
             self.handle_swipe_gesture(data["direction"])
             self.gesture_cooldown_timer.start(500)
             
-        elif gesture_type == "thumbs_up":
-            self.show_feedback("👍 SÍ")
-            self.handle_thumbs_up_gesture()
-            self.gesture_cooldown_timer.start(500)
-            
-        elif gesture_type == "thumbs_down":
-            self.show_feedback("👎 NO")
-            self.handle_thumbs_down_gesture()
-            self.gesture_cooldown_timer.start(500)
             
         elif gesture_type == "peace":
             self.show_feedback("✌️ ATRÁS")
@@ -518,15 +506,6 @@ class MainWindow(QMainWindow):
                 new_index = (current_index + 1) % self.stacked_widget.count()
                 self.stacked_widget.setCurrentIndex(new_index)
 
-    def handle_thumbs_up_gesture(self):
-        current_page = self.stacked_widget.currentWidget()
-        if isinstance(current_page, (TriagePage, QuestionPage)):
-            current_page.answer_yes()
-
-    def handle_thumbs_down_gesture(self):
-        current_page = self.stacked_widget.currentWidget()
-        if isinstance(current_page, (TriagePage, QuestionPage)):
-            current_page.answer_no()
 
     def handle_back_gesture(self):
         """Handle back gesture - Peace sign is more deliberate than open hand"""

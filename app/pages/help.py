@@ -52,24 +52,16 @@ class HelpPage(QWidget):
              "Solo el dedo índice extendido. Mueve el cursor virtual por la pantalla.",
              "#3b82f6"),
             
-            ("👊", "Puño (Clic)", 
-             "Cierra todos los dedos. Hace clic en el botón seleccionado.",
+            ("🖐️", "Cuatro Dedos (Clic)", 
+             "Extiende cuatro dedos (pulgar cerrado). Hace clic en el botón seleccionado.",
              "#10b981"),
             
             ("✌️", "Paz / Victory (Atrás)", 
              "Solo índice y medio extendidos. Regresa al menú principal.",
              "#f59e0b"),
             
-            ("👍", "Pulgar Arriba (Sí)", 
-             "Solo el pulgar extendido hacia arriba. Responde afirmativamente.",
-             "#10b981"),
-            
-            ("👎", "Pulgar Abajo (No)", 
-             "Solo el pulgar extendido hacia abajo. Responde negativamente.",
-             "#ef4444"),
-            
             ("🖐️", "Mano Abierta + Deslizar (Swipe)", 
-             "4-5 dedos extendidos, desliza la mano hacia la izquierda o derecha. Navega entre páginas o preguntas.",
+             "Mano abierta, desliza hacia la izquierda o derecha. Navega entre páginas o preguntas.",
              "#8b5cf6"),
         ]
 
