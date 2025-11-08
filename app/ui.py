@@ -10,6 +10,7 @@ from app.database import create_patient_table
 import configparser
 import os
 from dotenv import load_dotenv
+import sys
 
 # ==================== API WORKER ====================
 class DniApiWorker(QObject):
@@ -337,10 +338,12 @@ class MainWindow(QMainWindow):
         self.feedback_timer.timeout.connect(self.feedback_label.hide)
         
         # Virtual cursor for better feedback
-        self.virtual_cursor = VirtualCursor(self)
-        self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
-        self.virtual_cursor.show()
-        self.virtual_cursor.raise_()
+        self.virtual_cursor = None
+        if sys.platform == 'win32':
+            self.virtual_cursor = VirtualCursor(self)
+            self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
+            self.virtual_cursor.show()
+            self.virtual_cursor.raise_()
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -348,7 +351,8 @@ class MainWindow(QMainWindow):
             int((self.width() - self.feedback_label.width()) / 2), 
             int((self.height() - self.feedback_label.height()) / 2)
         )
-        self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
+        if self.virtual_cursor:
+            self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
     
     def show_feedback(self, text, duration=800):
         self.feedback_label.setText(text)
@@ -424,8 +428,9 @@ class MainWindow(QMainWindow):
 
         if gesture_type == "fist":
             self.show_feedback("👊 CLICK", 500)
-            self.virtual_cursor.set_clicking(True)
-            QTimer.singleShot(200, lambda: self.virtual_cursor.set_clicking(False))
+            if self.virtual_cursor:
+                self.virtual_cursor.set_clicking(True)
+                QTimer.singleShot(200, lambda: self.virtual_cursor.set_clicking(False))
             self.handle_fist_gesture()
             
         elif gesture_type == "swipe":
@@ -449,7 +454,8 @@ class MainWindow(QMainWindow):
         global_y = int(np.interp(y, [0, 480], [0, screen_height]))
         
         # Update virtual cursor position
-        self.virtual_cursor.update_position(global_x, global_y)
+        if self.virtual_cursor:
+            self.virtual_cursor.update_position(global_x, global_y)
 
         widget = QApplication.widgetAt(QPoint(global_x, global_y))
 
@@ -538,12 +544,3 @@ class MainWindow(QMainWindow):
             )
 
         self.stacked_widget.setCurrentWidget(self.pages[page_name])
-
-if __name__ == "__main__":
-    create_patient_table()
-    app = QApplication([])
-    
-    main_window = MainWindow()
-    main_window.show()
-    
-    app.exec()    
