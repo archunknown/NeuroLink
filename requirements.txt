@@ -30,6 +30,7 @@ opt_einsum==3.4.0
 packaging==25.0
 pillow==12.0.0
 protobuf==4.25.8
+PyAudio==0.2.14
 pycparser==2.23
 pyparsing==3.2.5
 pypiwin32==223 ; sys_platform == 'win32'
@@ -46,6 +47,7 @@ sentencepiece==0.2.1
 six==1.17.0
 sounddevice==0.5.2
 SQLAlchemy==2.0.44
+SpeechRecognition==3.10.4
 typing_extensions==4.15.0
 urllib3==2.5.0
 Werkzeug==3.1.3

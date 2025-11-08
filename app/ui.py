@@ -106,7 +106,7 @@ class CameraWidget(QWidget):
         min_tracking_confidence = config.getfloat("GestureDetection", "MinTrackingConfidence", fallback=0.85)
 
         # Configuración de la cámara y detector de manos
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self.detector = HandDetector(max_hands=max_hands, 
                                      detection_con=min_detection_confidence, 
                                      track_con=min_tracking_confidence)
