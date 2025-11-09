@@ -19,7 +19,7 @@ class RecordsPage(QWidget):
         back_btn = QPushButton("← Atrás")
         back_btn.setObjectName("btnSecondary")
         back_btn.setMaximumWidth(100)
-        back_btn.clicked.connect(lambda: self.switch_page("menu") )
+        back_btn.clicked.connect(lambda: self.switch_page("staff_dashboard"))
         header.addWidget(back_btn)
         header.addStretch()
         layout.addLayout(header)

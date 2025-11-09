@@ -46,7 +46,7 @@ class NaturalQueryPage(QWidget):
         
         self.back_button = QPushButton("Volver al Menú")
         self.back_button.setObjectName("btnSecondary")
-        self.back_button.clicked.connect(lambda: self.main_window.switch_page("menu"))
+        self.back_button.clicked.connect(lambda: self.main_window.switch_page("staff_dashboard"))
         layout.addWidget(self.back_button)
 
         self.response_label = QLabel("Los resultados de tu consulta aparecerán aquí.")

@@ -252,7 +252,7 @@ STYLE_SHEET = """
 """
 
 # ==================== PÁGINAS ====================
-from app.pages.main_menu import MainMenuPage
+from app.pages.welcome import WelcomePage
 from app.pages.triage import TriagePage
 from app.pages.assistant import AssistantPage
 from app.pages.records import RecordsPage
@@ -263,6 +263,27 @@ from app.pages.report import ReportPage
 from app.pages.natural_query import NaturalQueryPage
 
 from app.database import execute_query
+
+# Placeholder for Staff Dashboard
+class StaffDashboardPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("Panel de Personal Médico")
+        font = title.font()
+        font.setPointSize(24)
+        font.setBold(True)
+        title.setFont(font)
+        
+        subtitle = QLabel("Próximamente: Acceso a registros y consulta IA.")
+        font = subtitle.font()
+        font.setPointSize(16)
+        subtitle.setFont(font)
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
@@ -278,7 +299,8 @@ class MainWindow(QMainWindow):
         # Stack widget para cambiar entre páginas
         self.stacked_widget = QStackedWidget()
         self.pages = {
-            "menu": MainMenuPage(self),
+            "welcome": WelcomePage(self),
+            "staff_dashboard": StaffDashboardPage(self),
             "dni_input": DniInputPage(self),
             "triage": TriagePage(self),
             "assistant": AssistantPage(self),
@@ -291,8 +313,12 @@ class MainWindow(QMainWindow):
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)
         
-        # Conectar señal de DNI
+        # Conectar señales de las páginas
+        self.pages["welcome"].role_selected.connect(self.handle_role_selection)
         self.pages["dni_input"].dni_submitted.connect(self.start_dni_validation)
+
+        # Iniciar en la página de bienvenida
+        self.stacked_widget.setCurrentWidget(self.pages["welcome"])
 
         # Widget de la cámara
         self.camera_widget = CameraWidget()
@@ -516,13 +542,20 @@ class MainWindow(QMainWindow):
                 self.stacked_widget.setCurrentIndex(new_index)
 
 
+    def handle_role_selection(self, role):
+        if role == "new_patient":
+            self.switch_page("dni_input")
+        elif role == "in_room":
+            self.switch_page("assistant")
+        elif role == "staff":
+            # Aquí se podría añadir una lógica de contraseña en el futuro
+            self.switch_page("staff_dashboard")
+
     def handle_back_gesture(self):
         """Handle back gesture - Peace sign is more deliberate than open hand"""
-        current_page = self.stacked_widget.currentWidget()
-        if isinstance(current_page, DniInputPage):
-             self.switch_page("menu")
-        elif self.stacked_widget.currentWidget() != self.pages["menu"]:
-            self.switch_page("menu")
+        # Siempre regresa a la página de bienvenida, a menos que ya estemos ahí.
+        if self.stacked_widget.currentWidget() != self.pages["welcome"]:
+            self.switch_page("welcome")
 
     def switch_page(self, page_name, **kwargs):
         if page_name == "records":
