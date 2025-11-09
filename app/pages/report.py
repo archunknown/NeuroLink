@@ -29,7 +29,7 @@ class ReportPage(QWidget):
 
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
-        self.timer.timeout.connect(lambda: self.switch_page("menu"))
+        self.timer.timeout.connect(lambda: self.switch_page("welcome"))
 
     def set_report_data(self, patient_info, urgency, symptoms):
         full_name = f"{patient_info['nombres']} {patient_info['apellido_paterno']} {patient_info['apellido_materno']}".strip()
