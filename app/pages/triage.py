@@ -108,7 +108,7 @@ class TriagePage(QWidget):
         if get_patient_by_dni(patient['dni']):
             QMessageBox.warning(self, "Registro Duplicado", f"El DNI {patient['dni']} ya se encuentra registrado.")
             self.reset()
-            self.switch_page("menu")
+            self.switch_page("welcome")
             return
 
         urgency = "Alta" if any(self.answers) else "Normal"

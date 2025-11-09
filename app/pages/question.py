@@ -44,8 +44,8 @@ class QuestionPage(QWidget):
 
     def answer_yes(self):
         QMessageBox.information(self, "Respuesta", "Has respondido que SÍ.")
-        self.switch_page("menu")
+        self.switch_page("assistant")
 
     def answer_no(self):
         QMessageBox.warning(self, "Respuesta", "Has respondido que NO.")
-        self.switch_page("menu")
+        self.switch_page("assistant")

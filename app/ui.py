@@ -1,9 +1,10 @@
 import cv2
 import numpy as np
 import requests
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QStackedWidget
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QLabel, QStackedWidget, QMessageBox)
 from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEasingCurve, QThread, QObject
-from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen
+from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen, QIcon
 from app.vision import HandDetector
 from app.database import create_patient_table
 
@@ -166,19 +167,50 @@ class CameraWidget(QWidget):
 
 # ==================== ESTILOS ====================
 STYLE_SHEET = """
-    QMainWindow {
-        background-color: #0f172a;
+    QMainWindow, QWidget {
+        background-color: #00000e;
+        color: #96a9a5;
+        font-family: "Segoe UI";
     }
     
-    QWidget {
-        background-color: #0f172a;
-        color: #e2e8f0;
+    /* Estilo para las nuevas tarjetas de rol */
+    QPushButton#RoleCard {
+        background-color: #132b3a;
+        border: 2px solid #525e68;
+        border-radius: 12px;
+        text-align: center;
+        padding: 20px;
     }
     
+    QPushButton#RoleCard:hover {
+        background-color: #051624;
+        border: 2px solid #96a9a5;
+    }
+
+    QPushButton#RoleCard[selected="true"] {
+        border: 4px solid #96a9a5;
+        background-color: #051624;
+    }
+    
+    /* Estilo para el botón de ayuda */
+    QPushButton#HelpButton {
+        background-color: #132b3a;
+        border: 2px solid #96a9a5;
+        border-radius: 30px; /* Mitad del tamaño para hacerlo un círculo */
+        font-size: 24px;
+        font-weight: bold;
+    }
+
+    QPushButton#HelpButton:hover {
+        background-color: #96a9a5;
+        color: #00000e;
+    }
+    
+    /* Estilos de botones genéricos (se mantienen por si se usan en otras partes) */
     QPushButton {
-        background-color: #3b82f6;
-        color: white;
-        border: none;
+        background-color: #132b3a;
+        color: #96a9a5;
+        border: 1px solid #525e68;
         border-radius: 8px;
         padding: 12px 24px;
         font-weight: bold;
@@ -186,72 +218,61 @@ STYLE_SHEET = """
     }
     
     QPushButton:hover {
-        background-color: #2563eb;
+        background-color: #525e68;
+        border: 1px solid #96a9a5;
     }
     
     QPushButton:pressed {
-        background-color: #1d4ed8;
+        background-color: #051624;
     }
 
     QPushButton[selected="true"] {
-        border: 4px solid #facc15;
-        background-color: #2563eb;
+        border: 4px solid #96a9a5;
+        background-color: #525e68;
     }
     
     QPushButton#btnSecondary {
-        background-color: #64748b;
+        background-color: #525e68;
     }
     
     QPushButton#btnSecondary:hover {
-        background-color: #475569;
+        background-color: #96a9a5;
+        color: #00000e;
     }
     
-    QPushButton#btnDanger {
-        background-color: #ef4444;
-    }
-    
-    QPushButton#btnDanger:hover {
-        background-color: #dc2626;
-    }
-    
-    QPushButton#btnSuccess {
-        background-color: #10b981;
-    }
-    
-    QPushButton#btnSuccess:hover {
-        background-color: #059669;
-    }
-    
+    /* Estilos de texto */
     QLineEdit, QTextEdit {
-        background-color: #1e293b;
-        color: #e2e8f0;
-        border: 2px solid #334155;
+        background-color: #051624;
+        color: #96a9a5;
+        border: 2px solid #525e68;
         border-radius: 6px;
         padding: 10px;
         font-size: 13px;
     }
     
     QLineEdit:focus, QTextEdit:focus {
-        border: 2px solid #3b82f6;
+        border: 2px solid #96a9a5;
     }
     
     QLabel {
-        color: #e2e8f0;
+        color: #96a9a5;
+        background-color: transparent;
     }
     
     QLabel#title {
-        font-size: 28px;
+        font-size: 36px;
         font-weight: bold;
-        color: #3b82f6;
+        color: #96a9a5;
     }
     
     QLabel#subtitle {
-        font-size: 16px;
-        color: #94a3b8;
+        font-size: 18px;
+        color: #525e68;
     }
 """
 
 # ==================== PÁGINAS ====================
+from app.pages.shared_widgets import RoleCard
 from app.pages.welcome import WelcomePage
 from app.pages.triage import TriagePage
 from app.pages.assistant import AssistantPage
@@ -266,23 +287,62 @@ from app.database import execute_query
 
 # Placeholder for Staff Dashboard
 class StaffDashboardPage(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title = QLabel("Panel de Personal Médico")
-        font = title.font()
-        font.setPointSize(24)
-        font.setBold(True)
-        title.setFont(font)
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
         
-        subtitle = QLabel("Próximamente: Acceso a registros y consulta IA.")
-        font = subtitle.font()
-        font.setPointSize(16)
-        subtitle.setFont(font)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(50, 50, 50, 50)
+        main_layout.setSpacing(20)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        # Título
+        title = QLabel("Panel de Personal Médico")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Subtítulo
+        subtitle = QLabel("Seleccione una herramienta")
+        subtitle.setObjectName("subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Layout para las tarjetas
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(40)
+
+        icon_base_path = os.path.join("app", "assets", "icons")
+        
+        card_records = RoleCard(
+            os.path.join(icon_base_path, "records.png"),
+            "Ver Registros",
+            "Visualiza, busca y gestiona la lista de pacientes registrados."
+        )
+        card_ai_query = RoleCard(
+            os.path.join(icon_base_path, "ai_query.png"),
+            "Consulta con IA",
+            "Realiza preguntas en lenguaje natural sobre los datos de los pacientes."
+        )
+
+        cards_layout.addWidget(card_records)
+        cards_layout.addWidget(card_ai_query)
+
+        # Conectar señales
+        card_records.clicked.connect(lambda: self.main_window.switch_page("records"))
+        card_ai_query.clicked.connect(lambda: self.main_window.switch_page("natural_query"))
+
+        # Botón para volver
+        back_button = QPushButton("← Volver a la Selección de Rol")
+        back_button.setObjectName("btnSecondary")
+        back_button.setFixedWidth(300)
+        back_button.clicked.connect(lambda: self.main_window.switch_page("welcome"))
+
+        # Añadir widgets al layout principal
+        main_layout.addWidget(title)
+        main_layout.addWidget(subtitle)
+        main_layout.addStretch(1)
+        main_layout.addLayout(cards_layout)
+        main_layout.addStretch(1)
+        main_layout.addWidget(back_button, 0, Qt.AlignmentFlag.AlignCenter)
 
 
 # ==================== VENTANA PRINCIPAL ====================
@@ -370,15 +430,73 @@ class MainWindow(QMainWindow):
             self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
             self.virtual_cursor.show()
             self.virtual_cursor.raise_()
+
+        # Botón de Ayuda Contextual
+        self.help_button = QPushButton(self)
+        self.help_button.setObjectName("HelpButton")
+        self.help_button.setFixedSize(60, 60)
+        self.help_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "help.png")))
+        self.help_button.setIconSize(self.help_button.size() * 0.6)
+        self.help_button.setToolTip("Obtener ayuda contextual")
+        self.help_button.clicked.connect(self.show_contextual_help)
+        self.help_button.show()
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        # Mover el label de feedback
         self.feedback_label.move(
             int((self.width() - self.feedback_label.width()) / 2), 
             int((self.height() - self.feedback_label.height()) / 2)
         )
+        # Mover el cursor virtual
         if self.virtual_cursor:
             self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
+        
+        # Mover el botón de ayuda a la esquina inferior derecha
+        margin = 20
+        self.help_button.move(
+            self.width() - self.help_button.width() - margin,
+            self.height() - self.help_button.height() - margin
+        )
+        self.help_button.raise_()
+
+    def show_contextual_help(self):
+        current_page = self.stacked_widget.currentWidget()
+        title = "Ayuda Contextual"
+        text = "No hay ayuda disponible para esta página."
+
+        if isinstance(current_page, WelcomePage):
+            title = "Ayuda: Selección de Rol"
+            text = ("Usa tu mano para apuntar a una de las tarjetas y mantenla sobre ella para seleccionarla.\n\n"
+                    "Cierra el puño (gesto de 4 dedos) para confirmar tu selección.")
+        
+        elif isinstance(current_page, DniInputPage):
+            title = "Ayuda: Ingreso de DNI"
+            text = ("Puedes ingresar tu DNI usando el teclado numérico en pantalla o activando el modo de voz.\n\n"
+                    "Para usar los gestos, apunta a un número y cierra el puño para añadirlo.")
+
+        elif isinstance(current_page, TriagePage):
+            title = "Ayuda: Cuestionario de Triaje"
+            text = ("Responde a las preguntas con 'Sí' o 'No'.\n\n"
+                    "Puedes deslizar tu mano hacia la derecha para avanzar a la siguiente pregunta o hacia la izquierda para retroceder.")
+
+        elif isinstance(current_page, AssistantPage):
+            title = "Ayuda: Asistente de Paciente"
+            text = "Apunta a una de las opciones y cierra el puño para realizar una solicitud al personal de enfermería."
+
+        elif isinstance(current_page, StaffDashboardPage):
+            title = "Ayuda: Panel de Personal"
+            text = "Selecciona una de las herramientas para gestionar los datos de la clínica."
+
+        elif isinstance(current_page, RecordsPage):
+            title = "Ayuda: Registros de Pacientes"
+            text = "Aquí puedes visualizar la lista de todos los pacientes registrados. Usa el botón 'Actualizar' para recargar los datos."
+        
+        elif isinstance(current_page, NaturalQueryPage):
+            title = "Ayuda: Consulta con IA"
+            text = "Escribe una pregunta en español sobre los datos de los pacientes y presiona 'Consultar'.\n\nEj: ¿Cuál es el promedio de edad de los pacientes con urgencia alta?"
+
+        QMessageBox.information(self, title, text)
     
     def show_feedback(self, text, duration=800):
         self.feedback_label.setText(text)
