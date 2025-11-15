@@ -141,3 +141,8 @@ cython_debug/
 # Logs
 logs/
 *.log
+
+# NeuroLink specific
+/installer/NeuroLink-Installer.exe
+/app/logs/
+NeuroLink-Installer.iss

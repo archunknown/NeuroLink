@@ -1,27 +1,122 @@
 import cv2
 import numpy as np
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QTextEdit, QStackedWidget, QMessageBox
-from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal
-from PyQt6.QtGui import QFont, QImage, QPixmap
+import requests
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QLabel, QStackedWidget, QMessageBox)
+from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEasingCurve, QThread, QObject
+from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen, QIcon
 from app.vision import HandDetector
-from .database import create_patient_table, insert_patient, get_all_patients, update_patient_urgency
+from app.database import create_patient_table
 
-class CameraWindow(QWidget):
+import configparser
+import os
+from dotenv import load_dotenv
+import sys
+
+# ==================== API WORKER ====================
+class DniApiWorker(QObject):
+    """
+    Worker thread to handle DNI API requests without freezing the UI.
+    """
+    finished = pyqtSignal(dict)
+
+    def __init__(self, dni):
+        super().__init__()
+        load_dotenv()
+        self.dni = dni
+        self.api_token = os.getenv("API_TOKEN")
+        self.api_url = f"https://miapi.cloud/v1/dni/{self.dni}"
+
+    def run(self):
+        try:
+            response = requests.get(self.api_url, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=10)
+            if response.status_code == 200:
+                data = response.json().get("datos", {})
+                if data:
+                    self.finished.emit({"success": True, "data": data})
+                else:
+                    self.finished.emit({"success": False, "error": "DNI no encontrado."})
+            else:
+                self.finished.emit({"success": False, "error": f"Error en la API: {response.status_code}"})
+        except requests.RequestException as e:
+            self.finished.emit({"success": False, "error": f"Error de red: {e}"})
+
+
+class VirtualCursor(QWidget):
+    """Virtual cursor overlay for visual feedback"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        
+        self.cursor_pos = QPoint(0, 0)
+        self.cursor_size = 30
+        self.is_clicking = False
+        self.click_animation = 0
+        
+        # Animation timer
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self.animate)
+        self.animation_timer.start(30)
+        
+    def update_position(self, x, y):
+        self.cursor_pos = QPoint(x, y)
+        self.update()
+        
+    def set_clicking(self, clicking):
+        self.is_clicking = clicking
+        if clicking:
+            self.click_animation = 10
+        self.update()
+        
+    def animate(self):
+        if self.click_animation > 0:
+            self.click_animation -= 1
+            self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw outer ring
+        size = self.cursor_size + self.click_animation * 2
+        color = QColor(0, 255, 0) if self.is_clicking else QColor(0, 255, 255)
+        
+        pen = QPen(color, 3)
+        painter.setPen(pen)
+        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 50))
+        painter.drawEllipse(self.cursor_pos, size//2, size//2)
+        
+        # Draw center dot
+        painter.setBrush(color)
+        painter.drawEllipse(self.cursor_pos, 5, 5)
+
+class CameraWidget(QWidget):
     gesture_detected = pyqtSignal(str, object)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Cámara de Gestos")
-        self.setGeometry(1150, 100, 320, 240)
+
+        # Leer configuración
+        config = configparser.ConfigParser()
+        config.read("config.ini")
+        
+        max_hands = config.getint("GestureDetection", "MaxHands", fallback=1)
+        min_detection_confidence = config.getfloat("GestureDetection", "MinDetectionConfidence", fallback=0.85)
+        min_tracking_confidence = config.getfloat("GestureDetection", "MinTrackingConfidence", fallback=0.85)
 
         # Configuración de la cámara y detector de manos
-        self.cap = cv2.VideoCapture(0)
-        self.detector = HandDetector(detection_con=0.8, max_hands=1)
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        self.detector = HandDetector(max_hands=max_hands, 
+                                     detection_con=min_detection_confidence, 
+                                     track_con=min_tracking_confidence)
 
         # Etiqueta para mostrar el video
         self.camera_label = QLabel()
         layout = QVBoxLayout()
         layout.addWidget(self.camera_label)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         # Temporizador para actualizar el frame
@@ -34,22 +129,30 @@ class CameraWindow(QWidget):
         if not success:
             return
 
-        img = self.detector.find_hands(img, draw=False)
+        img = self.detector.find_hands(img, draw=True)
         lm_list = self.detector.find_position(img)
 
         if len(lm_list) != 0:
+            # Priority order: Check hover first, then other gestures
+            hover_pos = self.detector.get_hover_position()
+            if hover_pos:
+                self.gesture_detected.emit("hover", {"x": hover_pos[0], "y": hover_pos[1]})
+            
+            # Check for click (fist) - This should work even while hovering
             if self.detector.is_fist():
                 self.gesture_detected.emit("fist", {})
-            else:
-                hover_pos = self.detector.get_hover_position()
-                if hover_pos:
-                    self.gesture_detected.emit("hover", {"x": hover_pos[0], "y": hover_pos[1]})
-
+            
+            # Check for peace sign (back gesture)
+            if self.detector.detect_peace_sign():
+                self.gesture_detected.emit("peace", {})
+            
+            
+            # Check swipe gestures
             swipe_gesture = self.detector.detect_swipe()
             if swipe_gesture:
                 self.gesture_detected.emit("swipe", {"direction": swipe_gesture})
-
-        img = self.detector.find_hands(img, draw=True)
+        else:
+            self.detector.reset_state()
 
         img = cv2.flip(img, 1)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -64,19 +167,50 @@ class CameraWindow(QWidget):
 
 # ==================== ESTILOS ====================
 STYLE_SHEET = """
-    QMainWindow {
-        background-color: #0f172a;
+    QMainWindow, QWidget {
+        background-color: #00000e;
+        color: #96a9a5;
+        font-family: "Segoe UI";
     }
     
-    QWidget {
-        background-color: #0f172a;
-        color: #e2e8f0;
+    /* Estilo para las nuevas tarjetas de rol */
+    QPushButton#RoleCard {
+        background-color: #132b3a;
+        border: 2px solid #525e68;
+        border-radius: 12px;
+        text-align: center;
+        padding: 20px;
     }
     
+    QPushButton#RoleCard:hover {
+        background-color: #051624;
+        border: 2px solid #96a9a5;
+    }
+
+    QPushButton#RoleCard[selected="true"] {
+        border: 4px solid #96a9a5;
+        background-color: #051624;
+    }
+    
+    /* Estilo para el botón de ayuda */
+    QPushButton#HelpButton {
+        background-color: #132b3a;
+        border: 2px solid #96a9a5;
+        border-radius: 30px; /* Mitad del tamaño para hacerlo un círculo */
+        font-size: 24px;
+        font-weight: bold;
+    }
+
+    QPushButton#HelpButton:hover {
+        background-color: #96a9a5;
+        color: #00000e;
+    }
+    
+    /* Estilos de botones genéricos (se mantienen por si se usan en otras partes) */
     QPushButton {
-        background-color: #3b82f6;
-        color: white;
-        border: none;
+        background-color: #132b3a;
+        color: #96a9a5;
+        border: 1px solid #525e68;
         border-radius: 8px;
         padding: 12px 24px;
         font-weight: bold;
@@ -84,453 +218,388 @@ STYLE_SHEET = """
     }
     
     QPushButton:hover {
-        background-color: #2563eb;
+        background-color: #525e68;
+        border: 1px solid #96a9a5;
     }
     
     QPushButton:pressed {
-        background-color: #1d4ed8;
+        background-color: #051624;
     }
 
     QPushButton[selected="true"] {
-        border: 4px solid #facc15; /* Yellow-400 */
+        border: 4px solid #96a9a5;
+        background-color: #525e68;
     }
     
     QPushButton#btnSecondary {
-        background-color: #64748b;
+        background-color: #525e68;
     }
     
     QPushButton#btnSecondary:hover {
-        background-color: #475569;
+        background-color: #96a9a5;
+        color: #00000e;
     }
     
-    QPushButton#btnDanger {
-        background-color: #ef4444;
-    }
-    
-    QPushButton#btnDanger:hover {
-        background-color: #dc2626;
-    }
-    
-    QPushButton#btnSuccess {
-        background-color: #10b981;
-    }
-    
-    QPushButton#btnSuccess:hover {
-        background-color: #059669;
-    }
-    
+    /* Estilos de texto */
     QLineEdit, QTextEdit {
-        background-color: #1e293b;
-        color: #e2e8f0;
-        border: 2px solid #334155;
+        background-color: #051624;
+        color: #96a9a5;
+        border: 2px solid #525e68;
         border-radius: 6px;
         padding: 10px;
         font-size: 13px;
     }
     
     QLineEdit:focus, QTextEdit:focus {
-        border: 2px solid #3b82f6;
+        border: 2px solid #96a9a5;
     }
     
     QLabel {
-        color: #e2e8f0;
+        color: #96a9a5;
+        background-color: transparent;
     }
     
     QLabel#title {
-        font-size: 28px;
+        font-size: 36px;
         font-weight: bold;
-        color: #3b82f6;
+        color: #96a9a5;
     }
     
     QLabel#subtitle {
-        font-size: 16px;
-        color: #94a3b8;
+        font-size: 18px;
+        color: #525e68;
     }
 """
 
-# ==================== PÁGINA PRINCIPAL ====================
-class MainMenuPage(QWidget):
+# ==================== PÁGINAS ====================
+from app.pages.shared_widgets import RoleCard
+from app.pages.welcome import WelcomePage
+from app.pages.triage import TriagePage
+from app.pages.assistant import AssistantPage
+from app.pages.records import RecordsPage
+from app.pages.question import QuestionPage
+from app.pages.help import HelpPage
+from app.pages.dni_input import DniInputPage
+from app.pages.report import ReportPage
+from app.pages.natural_query import NaturalQueryPage
+
+from app.database import execute_query
+
+# Placeholder for Staff Dashboard
+class StaffDashboardPage(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 60, 40, 60)
         
-        # Logo/Título
-        title = QLabel("NeuroLink")
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(50, 50, 50, 50)
+        main_layout.setSpacing(20)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Título
+        title = QLabel("Panel de Personal Médico")
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold))
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Sistema Integrado de Gestión Neurológica")
+
+        # Subtítulo
+        subtitle = QLabel("Seleccione una herramienta")
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+
+        # Layout para las tarjetas
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(40)
+
+        icon_base_path = os.path.join("app", "assets", "icons")
         
-        layout.addSpacing(40)
-        
-        # Botones principales
-        btn_register = QPushButton("📋 Auto-Registro y Triaje")
-        btn_register.setFixedHeight(60)
-        btn_register.setFont(QFont("Segoe UI", 14))
-        btn_register.clicked.connect(lambda: self.switch_page("triage"))
-        layout.addWidget(btn_register)
-        
-        btn_assistant = QPushButton("🏥 Asistente de Paciente")
-        btn_assistant.setFixedHeight(60)
-        btn_assistant.setFont(QFont("Segoe UI", 14))
-        btn_assistant.clicked.connect(lambda: self.switch_page("assistant"))
-        layout.addWidget(btn_assistant)
-        
-        btn_records = QPushButton("📊 Registros de Pacientes")
-        btn_records.setFixedHeight(60)
-        btn_records.setFont(QFont("Segoe UI", 14))
-        btn_records.clicked.connect(lambda: self.switch_page("records"))
-        layout.addWidget(btn_records)
-        
-        layout.addStretch()
-        
-        self.setLayout(layout)
+        card_records = RoleCard(
+            os.path.join(icon_base_path, "records.png"),
+            "Ver Registros",
+            "Visualiza, busca y gestiona la lista de pacientes registrados."
+        )
+        card_ai_query = RoleCard(
+            os.path.join(icon_base_path, "ai_query.png"),
+            "Consulta con IA",
+            "Realiza preguntas en lenguaje natural sobre los datos de los pacientes."
+        )
 
-# ==================== PÁGINA DE TRIAJE (CUESTIONARIO) ====================
-class TriagePage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.questions = [
-            "¿Tiene fiebre alta (más de 38°C)?",
-            "¿Tiene dificultad para respirar?",
-            "¿Siente dolor en el pecho?",
-            "¿Ha perdido el conocimiento en las últimas 24 horas?",
-            "¿Tiene algún sangrado inusual?"
-        ]
-        self.answers = []
-        self.current_question_index = 0
-        self.init_ui()
+        cards_layout.addWidget(card_records)
+        cards_layout.addWidget(card_ai_query)
 
-    def init_ui(self):
-        self.layout = QVBoxLayout()
-        self.layout.setSpacing(20)
-        self.layout.setContentsMargins(50, 50, 50, 50)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Conectar señales
+        card_records.clicked.connect(lambda: self.main_window.switch_page("records"))
+        card_ai_query.clicked.connect(lambda: self.main_window.switch_page("natural_query"))
 
-        self.question_label = QLabel()
-        self.question_label.setObjectName("subtitle")
-        self.question_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(self.question_label)
+        # Botón para volver
+        back_button = QPushButton("← Volver a la Selección de Rol")
+        back_button.setObjectName("btnSecondary")
+        back_button.setFixedWidth(300)
+        back_button.clicked.connect(lambda: self.main_window.switch_page("welcome"))
 
-        self.layout.addSpacing(30)
+        # Añadir widgets al layout principal
+        main_layout.addWidget(title)
+        main_layout.addWidget(subtitle)
+        main_layout.addStretch(1)
+        main_layout.addLayout(cards_layout)
+        main_layout.addStretch(1)
+        main_layout.addWidget(back_button, 0, Qt.AlignmentFlag.AlignCenter)
 
-        self.button_layout = QHBoxLayout()
-        self.button_layout.setSpacing(40)
-
-        self.yes_button = QPushButton("👍 Sí")
-        self.yes_button.setObjectName("btnSuccess")
-        self.yes_button.setFixedHeight(80)
-        self.yes_button.clicked.connect(self.answer_yes)
-        self.button_layout.addWidget(self.yes_button)
-
-        self.no_button = QPushButton("👎 No")
-        self.no_button.setObjectName("btnDanger")
-        self.no_button.setFixedHeight(80)
-        self.no_button.clicked.connect(self.answer_no)
-        self.button_layout.addWidget(self.no_button)
-
-        self.layout.addLayout(self.button_layout)
-        
-        self.confirm_button = QPushButton("✓ Confirmar Cita")
-        self.confirm_button.setObjectName("btnSuccess")
-        self.confirm_button.setFixedHeight(60)
-        self.confirm_button.clicked.connect(self.confirm_appointment)
-        self.confirm_button.hide()
-        self.layout.addWidget(self.confirm_button)
-
-        self.setLayout(self.layout)
-        self.show_question()
-
-    def show_question(self):
-        if self.current_question_index < len(self.questions):
-            self.question_label.setText(self.questions[self.current_question_index])
-            self.yes_button.show()
-            self.no_button.show()
-            self.confirm_button.hide()
-        else:
-            self.question_label.setText("Cuestionario completado. ¿Desea confirmar la cita?")
-            self.yes_button.hide()
-            self.no_button.hide()
-            self.confirm_button.show()
-
-    def answer(self, answer):
-        self.answers.append(answer)
-        self.next_question()
-
-    def answer_yes(self):
-        self.answer(True)
-
-    def answer_no(self):
-        self.answer(False)
-
-    def next_question(self):
-        self.current_question_index += 1
-        self.show_question()
-
-    def previous_question(self):
-        if self.current_question_index > 0:
-            self.current_question_index -= 1
-            self.answers.pop()
-            self.show_question()
-
-    def confirm_appointment(self):
-        urgency = "Urgente" if any(self.answers) else "No Urgente"
-        symptoms = "Respuestas del cuestionario: " + str(self.answers)
-        # For now, let's use a generic name and age
-        if insert_patient("Paciente de Triaje", 30, symptoms, urgency):
-            QMessageBox.information(self, "Éxito", f"¡Cita confirmada! Su nivel de urgencia es: {urgency}")
-            self.reset()
-            self.switch_page("menu")
-        else:
-            QMessageBox.critical(self, "Error", "No se pudo confirmar la cita.")
-
-    def reset(self):
-        self.answers = []
-        self.current_question_index = 0
-        self.show_question()
-
-# ==================== PÁGINA ASISTENTE ====================
-class AssistantPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # Header
-        header = QHBoxLayout()
-        back_btn = QPushButton("← Atrás")
-        back_btn.setObjectName("btnSecondary")
-        back_btn.setMaximumWidth(100)
-        back_btn.clicked.connect(lambda: self.switch_page("menu") )
-        header.addWidget(back_btn)
-        header.addStretch()
-        layout.addLayout(header)
-        
-        # Título
-        title = QLabel("Asistente de Paciente")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Seleccione una opción para continuar")
-        subtitle.setObjectName("subtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
-        
-        layout.addSpacing(20)
-        
-        # Botones de solicitud
-        buttons = [
-            ("💧 Pedir Agua", self.request_water),
-            ("🚽 Pedir Baño", self.request_bathroom),
-            ("💊 Pedir Analgésicos", self.ask_for_painkiller),
-            ("📞 Llamar Enfermera", self.call_nurse),
-        ]
-        
-        for text, callback in buttons:
-            btn = QPushButton(text)
-            btn.setFixedHeight(70)
-            btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-            btn.clicked.connect(callback)
-            layout.addWidget(btn)
-        
-        layout.addStretch()
-        self.setLayout(layout)
-    
-    def request_water(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de agua.\n¡Un enfermero llegará pronto!")
-    
-    def request_bathroom(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de baño.\n¡Un enfermero llegará pronto!")
-    
-    def ask_for_painkiller(self):
-        question_page = self.main_window.pages["question"]
-        question_page.set_question("¿Está seguro de que desea pedir un analgésico?")
-        self.switch_page("question")
-
-    def call_nurse(self):
-        QMessageBox.information(self, "Llamada", "Se ha alertado a una enfermera.\n¡Llegará en unos momentos!")
-
-# ==================== PÁGINA DE REGISTROS ====================
-class RecordsPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # Header
-        header = QHBoxLayout()
-        back_btn = QPushButton("← Atrás")
-        back_btn.setObjectName("btnSecondary")
-        back_btn.setMaximumWidth(100)
-        back_btn.clicked.connect(lambda: self.switch_page("menu") )
-        header.addWidget(back_btn)
-        header.addStretch()
-        layout.addLayout(header)
-        
-        # Título
-        title = QLabel("Registros de Pacientes")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        
-        layout.addSpacing(10)
-        
-        # Área de registros
-        self.records_text = QTextEdit()
-        self.records_text.setReadOnly(True)
-        self.records_text.setStyleSheet("background-color: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 15px;")
-        layout.addWidget(self.records_text)
-        
-        # Botón refresh
-        btn_refresh = QPushButton("🔄 Actualizar")
-        btn_refresh.setFixedHeight(40)
-        btn_refresh.clicked.connect(self.load_records)
-        layout.addWidget(btn_refresh)
-        
-        self.load_records()
-        self.setLayout(layout)
-    
-    def load_records(self):
-        patients = get_all_patients()
-        if not patients:
-            self.records_text.setText("No hay registros de pacientes aún.")
-            return
-        
-        text = "<b style='color: #3b82f6; font-size: 14px;'>REGISTROS DE PACIENTES</b><br><br>"
-        for i, patient in enumerate(patients, 1):
-            urgency_color = "#ef4444" if patient[4] == "Urgente" else "#10b981"
-            text += "<div style='background-color: #0f172a; padding: 12px; margin: 8px 0; border-left: 4px solid " + urgency_color + "; border-radius: 4px;'>"
-            text += f"<b>#{i} - {patient[1]}</b> | Edad: {patient[2]} | {patient[5]}<br>"
-            text += f"Síntomas: {patient[3]}<br>"
-            text += f"Urgencia: <span style='color: {urgency_color}; font-weight: bold;'>{patient[4]}</span>"
-            text += "</div>"
-        self.records_text.setHtml(text)
-
-# ==================== PÁGINA DE PREGUNTAS ====================
-class QuestionPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self.switch_page = self.main_window.switch_page
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(50, 50, 50, 50)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.question_label = QLabel("¿Pregunta de ejemplo?")
-        self.question_label.setObjectName("subtitle")
-        self.question_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.question_label)
-
-        layout.addSpacing(30)
-
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(40)
-
-        self.yes_button = QPushButton("👍 Sí")
-        self.yes_button.setObjectName("btnSuccess")
-        self.yes_button.setFixedHeight(80)
-        self.yes_button.clicked.connect(self.answer_yes)
-        button_layout.addWidget(self.yes_button)
-
-        self.no_button = QPushButton("👎 No")
-        self.no_button.setObjectName("btnDanger")
-        self.no_button.setFixedHeight(80)
-        self.no_button.clicked.connect(self.answer_no)
-        button_layout.addWidget(self.no_button)
-
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-
-    def set_question(self, question):
-        self.question_label.setText(question)
-
-    def answer_yes(self):
-        QMessageBox.information(self, "Respuesta", "Has respondido que SÍ.")
-        self.switch_page("menu")
-
-    def answer_no(self):
-        QMessageBox.warning(self, "Respuesta", "Has respondido que NO.")
-        self.switch_page("menu")
 
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroLink - Sistema de Gestión Neurológica")
-        self.setGeometry(100, 100, 1000, 700)
+        self.setGeometry(100, 100, 1400, 750)
         self.setStyleSheet(STYLE_SHEET)
 
+        # Layout principal
+        main_layout = QHBoxLayout()
+        
         # Stack widget para cambiar entre páginas
         self.stacked_widget = QStackedWidget()
-
         self.pages = {
-            "menu": MainMenuPage(self),
+            "welcome": WelcomePage(self),
+            "staff_dashboard": StaffDashboardPage(self),
+            "dni_input": DniInputPage(self),
             "triage": TriagePage(self),
             "assistant": AssistantPage(self),
             "records": RecordsPage(self),
             "question": QuestionPage(self),
+            "help": HelpPage(self),
+            "report": ReportPage(self),
+            "natural_query": NaturalQueryPage(self),
         }
-
         for page in self.pages.values():
             self.stacked_widget.addWidget(page)
+        
+        # Conectar señales de las páginas
+        self.pages["welcome"].role_selected.connect(self.handle_role_selection)
+        self.pages["dni_input"].dni_submitted.connect(self.start_dni_validation)
 
-        self.setCentralWidget(self.stacked_widget)
+        # Iniciar en la página de bienvenida
+        self.stacked_widget.setCurrentWidget(self.pages["welcome"])
+
+        # Widget de la cámara
+        self.camera_widget = CameraWidget()
+        self.camera_widget.gesture_detected.connect(self.handle_gesture)
+
+        main_layout.addWidget(self.stacked_widget, 7)
+        main_layout.addWidget(self.camera_widget, 3)
+
+        # Widget central
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
+        
+        # Selected button tracking
         self.selected_button = None
+        self.hover_stable_timer = QTimer()
+        self.hover_stable_timer.setSingleShot(True)
+        self.hover_stable_timer.timeout.connect(self.on_hover_stable)
+        
+        # Gesture cooldowns
         self.fist_cooldown_timer = QTimer()
         self.fist_cooldown_timer.setSingleShot(True)
+        
         self.gesture_cooldown_timer = QTimer()
         self.gesture_cooldown_timer.setSingleShot(True)
-    
-    def handle_gesture(self, gesture_type, data):
-        if self.gesture_cooldown_timer.isActive():
-            return
 
+        # Feedback label
+        self.feedback_label = QLabel(self)
+        self.feedback_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.feedback_label.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 0.8); 
+            color: white; 
+            font-size: 48px; 
+            border-radius: 15px; 
+            padding: 20px;
+            font-weight: bold;
+        """
+        )
+        self.feedback_label.hide()
+
+        self.feedback_timer = QTimer(self)
+        self.feedback_timer.setSingleShot(True)
+        self.feedback_timer.timeout.connect(self.feedback_label.hide)
+        
+        # Virtual cursor for better feedback
+        self.virtual_cursor = None
+        if sys.platform == 'win32':
+            self.virtual_cursor = VirtualCursor(self)
+            self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
+            self.virtual_cursor.show()
+            self.virtual_cursor.raise_()
+
+        # Botón de Ayuda Contextual
+        self.help_button = QPushButton(self)
+        self.help_button.setObjectName("HelpButton")
+        self.help_button.setFixedSize(60, 60)
+        self.help_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "help.png")))
+        self.help_button.setIconSize(self.help_button.size() * 0.6)
+        self.help_button.setToolTip("Obtener ayuda contextual")
+        self.help_button.clicked.connect(self.show_contextual_help)
+        self.help_button.show()
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Mover el label de feedback
+        self.feedback_label.move(
+            int((self.width() - self.feedback_label.width()) / 2), 
+            int((self.height() - self.feedback_label.height()) / 2)
+        )
+        # Mover el cursor virtual
+        if self.virtual_cursor:
+            self.virtual_cursor.setGeometry(0, 0, self.width(), self.height())
+        
+        # Mover el botón de ayuda a la esquina inferior derecha
+        margin = 20
+        self.help_button.move(
+            self.width() - self.help_button.width() - margin,
+            self.height() - self.help_button.height() - margin
+        )
+        self.help_button.raise_()
+
+    def show_contextual_help(self):
+        current_page = self.stacked_widget.currentWidget()
+        title = "Ayuda Contextual"
+        text = "No hay ayuda disponible para esta página."
+
+        if isinstance(current_page, WelcomePage):
+            title = "Ayuda: Selección de Rol"
+            text = ("Usa tu mano para apuntar a una de las tarjetas y mantenla sobre ella para seleccionarla.\n\n"
+                    "Cierra el puño (gesto de 4 dedos) para confirmar tu selección.")
+        
+        elif isinstance(current_page, DniInputPage):
+            title = "Ayuda: Ingreso de DNI"
+            text = ("Puedes ingresar tu DNI usando el teclado numérico en pantalla o activando el modo de voz.\n\n"
+                    "Para usar los gestos, apunta a un número y cierra el puño para añadirlo.")
+
+        elif isinstance(current_page, TriagePage):
+            title = "Ayuda: Cuestionario de Triaje"
+            text = ("Responde a las preguntas con 'Sí' o 'No'.\n\n"
+                    "Puedes deslizar tu mano hacia la derecha para avanzar a la siguiente pregunta o hacia la izquierda para retroceder.")
+
+        elif isinstance(current_page, AssistantPage):
+            title = "Ayuda: Asistente de Paciente"
+            text = "Apunta a una de las opciones y cierra el puño para realizar una solicitud al personal de enfermería."
+
+        elif isinstance(current_page, StaffDashboardPage):
+            title = "Ayuda: Panel de Personal"
+            text = "Selecciona una de las herramientas para gestionar los datos de la clínica."
+
+        elif isinstance(current_page, RecordsPage):
+            title = "Ayuda: Registros de Pacientes"
+            text = "Aquí puedes visualizar la lista de todos los pacientes registrados. Usa el botón 'Actualizar' para recargar los datos."
+        
+        elif isinstance(current_page, NaturalQueryPage):
+            title = "Ayuda: Consulta con IA"
+            text = "Escribe una pregunta en español sobre los datos de los pacientes y presiona 'Consultar'.\n\nEj: ¿Cuál es el promedio de edad de los pacientes con urgencia alta?"
+
+        QMessageBox.information(self, title, text)
+    
+    def show_feedback(self, text, duration=800):
+        self.feedback_label.setText(text)
+        self.feedback_label.adjustSize()
+        self.feedback_label.move(
+            int((self.width() - self.feedback_label.width()) / 2), 
+            int((self.height() - self.feedback_label.height()) / 2)
+        )
+        self.feedback_label.show()
+        self.feedback_label.raise_()
+        self.feedback_timer.start(duration)
+
+    def start_dni_validation(self, dni):
+        self.show_feedback("Validando DNI...", 20000) # Show until response
+        self.thread = QThread()
+        self.worker = DniApiWorker(dni)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.on_dni_validation_complete)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+    def on_dni_validation_complete(self, result):
+        self.feedback_timer.stop()
+        self.feedback_label.hide()
+
+        if result["success"]:
+            patient_data = result["data"]
+            # Parse name and address
+            raw_nombres = patient_data.get("nombres", "")
+            paterno = patient_data.get("ape_paterno", "")
+            materno = patient_data.get("ape_materno", "")
+            
+            domiciliado = patient_data.get("domiciliado", {})
+            direccion = domiciliado.get("direccion", "")
+            distrito = domiciliado.get("distrito", "")
+            provincia = domiciliado.get("provincia", "")
+
+            welcome_name = f"{raw_nombres} {paterno} {materno}".strip()
+            self.show_feedback(f"Bienvenido(a)\n{welcome_name}", 2500)
+            
+            # Prepare data for triage page
+            patient_info = {
+                "dni": patient_data.get("dni", ""),
+                "nombres": raw_nombres,
+                "apellido_paterno": paterno,
+                "apellido_materno": materno,
+                "edad": 30, # Placeholder, API doesn't provide age
+                "direccion": direccion,
+                "distrito": distrito,
+                "provincia": provincia
+            }
+            
+            # Proceed to triage after welcome message
+            QTimer.singleShot(2600, lambda: self.switch_page("triage", patient_info=patient_info))
+        else:
+            error_message = result.get("error", "Error desconocido")
+            self.show_feedback(f"Error: {error_message}", 3000)
+            # Reset DNI page to allow re-entry
+            self.pages["dni_input"].reset()
+
+    def handle_gesture(self, gesture_type, data):
+        # Hover has no cooldown - it's continuous
         if gesture_type == "hover":
             self.handle_hover_gesture(data["x"], data["y"])
-        elif gesture_type == "fist":
-            self.handle_fist_gesture()
-        elif gesture_type == "swipe":
-            self.handle_swipe_gesture(data["direction"])
+            return
         
-        self.gesture_cooldown_timer.start(500)
+        # Other gestures respect cooldown
+        if self.gesture_cooldown_timer.isActive() and gesture_type != "fist":
+            return
+
+        if gesture_type == "fist":
+            self.show_feedback("👊 CLICK", 500)
+            if self.virtual_cursor:
+                self.virtual_cursor.set_clicking(True)
+                QTimer.singleShot(200, lambda: self.virtual_cursor.set_clicking(False))
+            self.handle_fist_gesture()
+            
+        elif gesture_type == "swipe":
+            direction_emoji = "➡️" if data["direction"] == "right" else "⬅️"
+            self.show_feedback(direction_emoji)
+            self.handle_swipe_gesture(data["direction"])
+            self.gesture_cooldown_timer.start(500)
+            
+            
+        elif gesture_type == "peace":
+            self.show_feedback("✌️ ATRÁS")
+            self.handle_back_gesture()
+            self.gesture_cooldown_timer.start(800)
 
     def handle_hover_gesture(self, x, y):
         screen_width = QApplication.primaryScreen().size().width()
         screen_height = QApplication.primaryScreen().size().height()
         
+        # Map camera coordinates to screen coordinates
         global_x = int(np.interp(x, [0, 640], [0, screen_width]))
         global_y = int(np.interp(y, [0, 480], [0, screen_height]))
+        
+        # Update virtual cursor position
+        if self.virtual_cursor:
+            self.virtual_cursor.update_position(global_x, global_y)
 
         widget = QApplication.widgetAt(QPoint(global_x, global_y))
 
@@ -540,31 +609,38 @@ class MainWindow(QMainWindow):
         elif widget and isinstance(widget.parent(), QPushButton):
             button = widget.parent()
 
+        # Deselect previous button
         if self.selected_button and self.selected_button != button:
             self.selected_button.setProperty("selected", False)
             self.selected_button.style().unpolish(self.selected_button)
             self.selected_button.style().polish(self.selected_button)
 
+        # Select new button
         self.selected_button = button
         if self.selected_button:
             self.selected_button.setProperty("selected", True)
             self.selected_button.style().unpolish(self.selected_button)
             self.selected_button.style().polish(self.selected_button)
+            
+            # Start stable hover timer (for future enhancements)
+            self.hover_stable_timer.start(500)
+    
+    def on_hover_stable(self):
+        """Called when hover is stable on a button for a while"""
+        # Could add additional feedback here if needed
+        pass
 
     def handle_fist_gesture(self):
+        """Handle fist/click gesture - works independently of other cooldowns"""
         if self.selected_button and not self.fist_cooldown_timer.isActive():
-            current_page = self.stacked_widget.currentWidget()
-            if isinstance(current_page, TriagePage):
-                if self.selected_button == current_page.yes_button:
-                    current_page.answer_yes()
-                elif self.selected_button == current_page.no_button:
-                    current_page.answer_no()
-                else:
-                    self.selected_button.click()
-            else:
-                self.selected_button.click()
+            # Visual feedback
+            self.selected_button.setProperty("selected", False)
+            self.selected_button.style().unpolish(self.selected_button)
+            self.selected_button.style().polish(self.selected_button)
             
-            self.fist_cooldown_timer.start(1000)  # 1 second cooldown
+            # Trigger click
+            self.selected_button.click()
+            self.fist_cooldown_timer.start(800)  # Prevent rapid double-clicks
 
     def handle_swipe_gesture(self, direction):
         current_page = self.stacked_widget.currentWidget()
@@ -574,6 +650,7 @@ class MainWindow(QMainWindow):
             elif direction == "left":
                 current_page.previous_question()
         else:
+            # Navigate between pages
             current_index = self.stacked_widget.currentIndex()
             if direction == "left":
                 new_index = (current_index - 1) % self.stacked_widget.count()
@@ -582,26 +659,39 @@ class MainWindow(QMainWindow):
                 new_index = (current_index + 1) % self.stacked_widget.count()
                 self.stacked_widget.setCurrentIndex(new_index)
 
-    def switch_page(self, page_name):
+
+    def handle_role_selection(self, role):
+        if role == "new_patient":
+            self.switch_page("dni_input")
+        elif role == "in_room":
+            self.switch_page("assistant")
+        elif role == "staff":
+            # Aquí se podría añadir una lógica de contraseña en el futuro
+            self.switch_page("staff_dashboard")
+
+    def handle_back_gesture(self):
+        """Handle back gesture - Peace sign is more deliberate than open hand"""
+        # Siempre regresa a la página de bienvenida, a menos que ya estemos ahí.
+        if self.stacked_widget.currentWidget() != self.pages["welcome"]:
+            self.switch_page("welcome")
+
+    def switch_page(self, page_name, **kwargs):
         if page_name == "records":
             self.pages["records"].load_records()
         
         if page_name == "triage":
             self.pages["triage"].reset()
+            if "patient_info" in kwargs:
+                self.pages["triage"].start_triage(kwargs["patient_info"])
+
+        if page_name == "dni_input":
+            self.pages["dni_input"].reset()
+
+        if page_name == "report":
+            self.pages["report"].set_report_data(
+                kwargs.get("patient_info"),
+                kwargs.get("urgency"),
+                kwargs.get("symptoms")
+            )
 
         self.stacked_widget.setCurrentWidget(self.pages[page_name])
-
-if __name__ == "__main__":
-    create_patient_table()
-    app = QApplication([])
-    
-    main_window = MainWindow()
-    camera_window = CameraWindow()
-    
-    # Conectar la señal de gestos de la cámara al manejador de la ventana principal
-    camera_window.gesture_detected.connect(main_window.handle_gesture)
-    
-    main_window.show()
-    camera_window.show()
-    
-    app.exec()
