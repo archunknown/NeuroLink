@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
 from app.ia_client import get_conversational_answer
 
 class AIWorker(QObject):
@@ -69,7 +69,7 @@ class NaturalQueryPage(QWidget):
 
     def handle_query(self):
         user_query = self.query_input.text()
-        if not user_query:
+        if not user_query or not self.query_button.isEnabled():
             return
 
         self.query_button.setEnabled(False)
@@ -88,9 +88,17 @@ class NaturalQueryPage(QWidget):
 
     def on_ai_finish(self, response):
         self.response_label.setText(response)
+        # Iniciar un temporizador para reactivar el botón después de un cooldown
+        QTimer.singleShot(3000, self.enable_inputs)
+
+    def enable_inputs(self):
+        """Reactiva los campos de entrada después del cooldown."""
         self.query_button.setEnabled(True)
         self.query_input.setEnabled(True)
+        self.response_label.setText(f"{self.response_label.text()}\n\nYa puedes realizar otra consulta.")
 
     def reset(self):
         self.query_input.clear()
         self.response_label.setText("Los resultados de tu consulta aparecerán aquí.")
+        self.query_button.setEnabled(True)
+        self.query_input.setEnabled(True)
