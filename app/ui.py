@@ -102,9 +102,13 @@ class CameraWidget(QWidget):
         config = configparser.ConfigParser()
         config.read("config.ini")
         
+        # Config de gestos
         max_hands = config.getint("GestureDetection", "MaxHands", fallback=1)
         min_detection_confidence = config.getfloat("GestureDetection", "MinDetectionConfidence", fallback=0.85)
         min_tracking_confidence = config.getfloat("GestureDetection", "MinTrackingConfidence", fallback=0.85)
+        
+        # Config de UI
+        self.show_landmarks_only = config.getboolean("UI", "show_landmarks_only", fallback=False)
 
         # Configuración de la cámara y detector de manos
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -129,33 +133,41 @@ class CameraWidget(QWidget):
         if not success:
             return
 
-        img = self.detector.find_hands(img, draw=True)
-        lm_list = self.detector.find_position(img)
+        # Procesar la imagen para encontrar manos, pero no dibujar todavía
+        processed_img = self.detector.find_hands(img, draw=False)
+        lm_list = self.detector.find_position(processed_img)
 
+        # Lógica de detección de gestos (no cambia)
         if len(lm_list) != 0:
-            # Priority order: Check hover first, then other gestures
             hover_pos = self.detector.get_hover_position()
             if hover_pos:
                 self.gesture_detected.emit("hover", {"x": hover_pos[0], "y": hover_pos[1]})
-            
-            # Check for click (fist) - This should work even while hovering
             if self.detector.is_fist():
                 self.gesture_detected.emit("fist", {})
-            
-            # Check for peace sign (back gesture)
             if self.detector.detect_peace_sign():
                 self.gesture_detected.emit("peace", {})
-            
-            
-            # Check swipe gestures
             swipe_gesture = self.detector.detect_swipe()
             if swipe_gesture:
                 self.gesture_detected.emit("swipe", {"direction": swipe_gesture})
         else:
             self.detector.reset_state()
 
-        img = cv2.flip(img, 1)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # Preparar la imagen final para mostrar
+        display_img = None
+        if self.show_landmarks_only:
+            # Crear un lienzo negro y dibujar solo los landmarks
+            display_img = np.zeros_like(img)
+            if self.detector.results.multi_hand_landmarks:
+                for hand_lms in self.detector.results.multi_hand_landmarks:
+                    self.detector.mp_draw.draw_landmarks(
+                        display_img, hand_lms, self.detector.mp_hands.HAND_CONNECTIONS)
+        else:
+            # Dibujar sobre la imagen original
+            display_img = self.detector.find_hands(img, draw=True)
+
+        # Convertir y mostrar la imagen final
+        display_img = cv2.flip(display_img, 1)
+        img_rgb = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
         h, w, ch = img_rgb.shape
         bytes_per_line = ch * w
         qt_image = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
@@ -168,49 +180,50 @@ class CameraWidget(QWidget):
 # ==================== ESTILOS ====================
 STYLE_SHEET = """
     QMainWindow, QWidget {
-        background-color: #00000e;
-        color: #96a9a5;
+        background-color: #000000;
+        color: #FFFFFF;
         font-family: "Segoe UI";
     }
     
     /* Estilo para las nuevas tarjetas de rol */
     QPushButton#RoleCard {
-        background-color: #132b3a;
-        border: 2px solid #525e68;
+        background-color: #1C1C1C;
+        border: 2px solid #888888;
         border-radius: 12px;
         text-align: center;
         padding: 20px;
     }
     
     QPushButton#RoleCard:hover {
-        background-color: #051624;
-        border: 2px solid #96a9a5;
+        background-color: #2A2A2A;
+        border: 2px solid #FFFFFF;
     }
 
     QPushButton#RoleCard[selected="true"] {
-        border: 4px solid #96a9a5;
-        background-color: #051624;
+        border: 4px solid #00A1FF;
+        background-color: #2A2A2A;
     }
     
     /* Estilo para el botón de ayuda */
     QPushButton#HelpButton {
-        background-color: #132b3a;
-        border: 2px solid #96a9a5;
+        background-color: #1C1C1C;
+        border: 2px solid #00A1FF;
         border-radius: 30px; /* Mitad del tamaño para hacerlo un círculo */
         font-size: 24px;
         font-weight: bold;
+        color: #FFFFFF;
     }
 
     QPushButton#HelpButton:hover {
-        background-color: #96a9a5;
-        color: #00000e;
+        background-color: #00A1FF;
+        color: #000000;
     }
     
     /* Estilos de botones genéricos (se mantienen por si se usan en otras partes) */
     QPushButton {
-        background-color: #132b3a;
-        color: #96a9a5;
-        border: 1px solid #525e68;
+        background-color: #1C1C1C;
+        color: #FFFFFF;
+        border: 1px solid #888888;
         border-radius: 8px;
         padding: 12px 24px;
         font-weight: bold;
@@ -218,56 +231,58 @@ STYLE_SHEET = """
     }
     
     QPushButton:hover {
-        background-color: #525e68;
-        border: 1px solid #96a9a5;
+        background-color: #888888;
+        color: #000000;
+        border: 1px solid #FFFFFF;
     }
     
     QPushButton:pressed {
-        background-color: #051624;
+        background-color: #2A2A2A;
     }
 
     QPushButton[selected="true"] {
-        border: 4px solid #96a9a5;
-        background-color: #525e68;
+        border: 4px solid #00A1FF;
+        background-color: #888888;
     }
     
     QPushButton#btnSecondary {
-        background-color: #525e68;
+        background-color: #888888;
+        color: #000000;
     }
     
     QPushButton#btnSecondary:hover {
-        background-color: #96a9a5;
-        color: #00000e;
+        background-color: #FFFFFF;
+        color: #000000;
     }
     
     /* Estilos de texto */
     QLineEdit, QTextEdit {
-        background-color: #051624;
-        color: #96a9a5;
-        border: 2px solid #525e68;
+        background-color: #1C1C1C;
+        color: #FFFFFF;
+        border: 2px solid #888888;
         border-radius: 6px;
         padding: 10px;
         font-size: 13px;
     }
     
     QLineEdit:focus, QTextEdit:focus {
-        border: 2px solid #96a9a5;
+        border: 2px solid #00A1FF;
     }
     
     QLabel {
-        color: #96a9a5;
+        color: #FFFFFF;
         background-color: transparent;
     }
     
     QLabel#title {
         font-size: 36px;
         font-weight: bold;
-        color: #96a9a5;
+        color: #FFFFFF;
     }
     
     QLabel#subtitle {
         font-size: 18px;
-        color: #525e68;
+        color: #888888;
     }
 """
 
