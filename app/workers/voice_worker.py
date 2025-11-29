@@ -11,8 +11,9 @@ class VoiceWorker(QObject):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self):
+    def __init__(self, phrase_time_limit=5):
         super().__init__()
+        self.phrase_time_limit = phrase_time_limit
         self.recognizer = sr.Recognizer()
         self.mic_available = False
         self._is_running = True
@@ -35,7 +36,7 @@ class VoiceWorker(QObject):
                 with self.microphone as source:
                     self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
                     self.listening.emit()
-                    audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                    audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=self.phrase_time_limit)
                 
                 self.processing.emit()
                 text = self.recognizer.recognize_google(audio, language="es-ES")

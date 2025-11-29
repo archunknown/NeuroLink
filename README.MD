@@ -38,7 +38,7 @@ Para empezar a usar NeuroLink, sigue estos sencillos pasos:
 Una vez que hayas instalado las dependencias, puedes ejecutar la aplicación con el siguiente comando:
 
 ```
-python -m app.ui
+python main.py
 ```
 
 ## Contribuciones

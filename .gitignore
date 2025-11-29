@@ -146,3 +146,5 @@ logs/
 /installer/NeuroLink-Installer.exe
 /app/logs/
 NeuroLink-Installer.iss
+installer/NeuroLink_Setup.exe
+test_gemini.py

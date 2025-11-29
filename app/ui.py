@@ -118,6 +118,7 @@ class CameraWidget(QWidget):
 
         # Etiqueta para mostrar el video
         self.camera_label = QLabel()
+        self.camera_label.setStyleSheet("border: 2px solid red;")
         layout = QVBoxLayout()
         layout.addWidget(self.camera_label)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -176,7 +177,6 @@ class CameraWidget(QWidget):
     def closeEvent(self, event):
         self.cap.release()
         event.accept()
-
 # ==================== ESTILOS ====================
 STYLE_SHEET = """
     QMainWindow, QWidget {
@@ -358,13 +358,12 @@ class StaffDashboardPage(QWidget):
         main_layout.addLayout(cards_layout)
         main_layout.addStretch(1)
         main_layout.addWidget(back_button, 0, Qt.AlignmentFlag.AlignCenter)
-
-
 # ==================== VENTANA PRINCIPAL ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroLink - Sistema de Gestión Neurológica")
+        self.setWindowIcon(QIcon(os.path.join("app", "assets", "logo.png")))
         self.setGeometry(100, 100, 1400, 750)
         self.setStyleSheet(STYLE_SHEET)
 
@@ -430,8 +429,7 @@ class MainWindow(QMainWindow):
             border-radius: 15px; 
             padding: 20px;
             font-weight: bold;
-        """
-        )
+        """)
         self.feedback_label.hide()
 
         self.feedback_timer = QTimer(self)
@@ -455,6 +453,12 @@ class MainWindow(QMainWindow):
         self.help_button.setToolTip("Obtener ayuda contextual")
         self.help_button.clicked.connect(self.show_contextual_help)
         self.help_button.show()
+
+        # Toast Notification Container
+        self.toast_widget = None
+        self.toast_timer = QTimer()
+        self.toast_timer.setSingleShot(True)
+        self.toast_timer.timeout.connect(self.hide_toast)
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -474,6 +478,46 @@ class MainWindow(QMainWindow):
             self.height() - self.help_button.height() - margin
         )
         self.help_button.raise_()
+    def show_toast(self, message, duration=3000):
+        if self.toast_widget:
+            self.toast_widget.close()
+        
+        self.toast_widget = QLabel(message, self)
+        self.toast_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.toast_widget.setStyleSheet("""
+            background-color: #333333;
+            color: #FFFFFF;
+            border-radius: 10px;
+            padding: 15px 25px;
+            font-size: 16px;
+            border: 1px solid #555555;
+        """)
+        self.toast_widget.adjustSize()
+        
+        margin = 30
+        x = self.width() - self.toast_widget.width() - margin
+        y = margin + 50 
+        
+        self.toast_widget.move(x, y)
+        self.toast_widget.show()
+        self.toast_widget.raise_()
+        
+        self.toast_opacity = QPropertyAnimation(self.toast_widget, b"windowOpacity")
+        self.toast_opacity.setDuration(300)
+        self.toast_opacity.setStartValue(0.0)
+        self.toast_opacity.setEndValue(1.0)
+        self.toast_opacity.start()
+
+        self.toast_timer.start(duration)
+
+    def hide_toast(self):
+        if self.toast_widget:
+            self.toast_opacity = QPropertyAnimation(self.toast_widget, b"windowOpacity")
+            self.toast_opacity.setDuration(300)
+            self.toast_opacity.setStartValue(1.0)
+            self.toast_opacity.setEndValue(0.0)
+            self.toast_opacity.finished.connect(self.toast_widget.close)
+            self.toast_opacity.start()
 
     def show_contextual_help(self):
         current_page = self.stacked_widget.currentWidget()

@@ -1,5 +1,5 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox, QSpacerItem, QSizePolicy
-from PyQt6.QtCore import Qt, QThread
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSpacerItem, QSizePolicy
+from PyQt6.QtCore import Qt, QThread, QTimer
 from PyQt6.QtGui import QFont
 from ..utils.audio import speak
 from ..workers.voice_worker import VoiceWorker
@@ -140,12 +140,12 @@ class AssistantPage(QWidget):
         self.stop_voice_mode()
 
     def request_water(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de agua.\n¡Un enfermero llegará pronto!")
         speak("Solicitud de agua registrada.", self)
+        self.main_window.show_toast("💧 Solicitud de agua registrada.\n¡Un enfermero llegará pronto!")
     
     def request_bathroom(self):
-        QMessageBox.information(self, "Solicitud", "Se ha registrado tu solicitud de baño.\n¡Un enfermero llegará pronto!")
         speak("Solicitud de baño registrada.", self)
+        self.main_window.show_toast("🚽 Solicitud de baño registrada.\n¡Un enfermero llegará pronto!")
     
     def ask_for_painkiller(self):
         question_page = self.main_window.pages["question"]
@@ -153,5 +153,5 @@ class AssistantPage(QWidget):
         self.switch_page("question")
 
     def call_nurse(self):
-        QMessageBox.information(self, "Llamada", "Se ha alertado a una enfermera.\n¡Llegará en unos momentos!")
         speak("Alerta a enfermería enviada.", self)
+        self.main_window.show_toast("📞 Alerta a enfermería enviada.\n¡Llegará en unos momentos!")
