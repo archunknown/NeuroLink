@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal, QPropertyAnimation, QEa
 from PyQt6.QtGui import QImage, QPixmap, QCursor, QPainter, QColor, QPen, QIcon
 from app.vision import HandDetector
 from app.database import create_patient_table
+from app.utils.paths import resource_path  # <--- IMPORTANTE: GPS de archivos
 
 import configparser
 import os
@@ -22,7 +23,8 @@ class DniApiWorker(QObject):
 
     def __init__(self, dni):
         super().__init__()
-        load_dotenv()
+        # Cargar variables de entorno de forma segura
+        load_dotenv(resource_path(".env"))
         self.dni = dni
         self.api_token = os.getenv("API_TOKEN")
         self.api_url = f"https://miapi.cloud/v1/dni/{self.dni}"
@@ -98,9 +100,10 @@ class CameraWidget(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Leer configuración
+        # Leer configuración de forma segura (usando resource_path)
         config = configparser.ConfigParser()
-        config.read("config.ini")
+        config_path = resource_path("config.ini") # <--- CORRECCIÓN CONFIG
+        config.read(config_path)
         
         # Config de gestos
         max_hands = config.getint("GestureDetection", "MaxHands", fallback=1)
@@ -325,7 +328,8 @@ class StaffDashboardPage(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(40)
 
-        icon_base_path = os.path.join("app", "assets", "icons")
+        # --- CORRECCIÓN RUTA ICONOS (El fix que pediste) ---
+        icon_base_path = resource_path(os.path.join("app", "assets", "icons"))
         
         card_records = RoleCard(
             os.path.join(icon_base_path, "records.png"),
@@ -363,7 +367,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NeuroLink - Sistema de Gestión Neurológica")
-        self.setWindowIcon(QIcon(os.path.join("app", "assets", "logo.png")))
+        
+        # CORRECCIÓN ICONO VENTANA
+        icon_path = resource_path(os.path.join("app", "assets", "logo.png"))
+        self.setWindowIcon(QIcon(icon_path))
+        
         self.setGeometry(100, 100, 1400, 750)
         self.setStyleSheet(STYLE_SHEET)
 
@@ -448,7 +456,11 @@ class MainWindow(QMainWindow):
         self.help_button = QPushButton(self)
         self.help_button.setObjectName("HelpButton")
         self.help_button.setFixedSize(60, 60)
-        self.help_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "help.png")))
+        
+        # CORRECCIÓN ICONO AYUDA
+        help_icon_path = resource_path(os.path.join("app", "assets", "icons", "help.png"))
+        self.help_button.setIcon(QIcon(help_icon_path))
+        
         self.help_button.setIconSize(self.help_button.size() * 0.6)
         self.help_button.setToolTip("Obtener ayuda contextual")
         self.help_button.clicked.connect(self.show_contextual_help)

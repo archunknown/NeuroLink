@@ -1,7 +1,9 @@
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpacerItem, QSizePolicy
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpacerItem, QSizePolicy, QPushButton
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, pyqtSignal
 from .shared_widgets import RoleCard
+from app.utils.paths import resource_path  # <--- IMPORTANTE: El "GPS" de archivos
 
 class WelcomePage(QWidget):
     """
@@ -31,8 +33,9 @@ class WelcomePage(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(40)
 
-        # Crear y añadir las tarjetas
-        icon_base_path = os.path.join("app", "assets", "icons")
+        # --- CORRECCIÓN DE RUTAS AQUI ---
+        # Usamos resource_path para encontrar la carpeta assets correctamente ya sea en codigo o exe
+        icon_base_path = resource_path(os.path.join("app", "assets", "icons"))
         
         card_new_patient = RoleCard(
             os.path.join(icon_base_path, "new_patient.png"),
@@ -67,13 +70,15 @@ class WelcomePage(QWidget):
         main_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
         # Botón de Salir
-        from PyQt6.QtWidgets import QPushButton
-        from PyQt6.QtGui import QIcon
-        
         exit_button = QPushButton("Salir")
         exit_button.setObjectName("btnSecondary")
         exit_button.setFixedWidth(150)
-        exit_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "close.png"))) # Assuming icon exists or will fallback
+        
+        # CORRECCIÓN ICONO SALIR
+        exit_icon_path = resource_path(os.path.join("app", "assets", "icons", "close.png"))
+        if os.path.exists(exit_icon_path): 
+             exit_button.setIcon(QIcon(exit_icon_path))
+        
         exit_button.clicked.connect(lambda: parent.close() if parent else self.window().close())
         
         main_layout.addWidget(exit_button, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)

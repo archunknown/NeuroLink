@@ -1,10 +1,11 @@
 import os
 import json
 import requests
-from dotenv import load_dotenv
+# Borra o comenta la importación y la llamada a load_dotenv
+# from dotenv import load_dotenv  
 from .database import get_all_patients_as_dicts
 
-load_dotenv()
+# load_dotenv()  <-- BORRAR ESTO
 
 def get_conversational_answer(user_query: str) -> str:
     """

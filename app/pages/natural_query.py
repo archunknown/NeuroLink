@@ -4,6 +4,7 @@ from PyQt6.QtGui import QIcon
 from app.ia_client import get_conversational_answer
 from app.utils.audio import speak
 from app.workers.voice_worker import VoiceWorker
+from app.utils.paths import resource_path  # <--- IMPORTANTE
 import os
 
 class AIWorker(QObject):
@@ -24,7 +25,7 @@ class NaturalQueryPage(QWidget):
         self.main_window = main_window
         self.voice_thread = None
         self.thread = None
-        self.voice_worker = None # Initialize voice_worker here
+        self.voice_worker = None 
         self.init_ui()
 
     def init_ui(self):
@@ -63,7 +64,12 @@ class NaturalQueryPage(QWidget):
         # Microphone Button (Prominent)
         self.mic_button = QPushButton()
         self.mic_button.setFixedSize(100, 100)
-        self.mic_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "mic.png")))
+        
+        # --- CORRECCIÓN RUTA MICROFONO ---
+        mic_icon_path = resource_path(os.path.join("app", "assets", "icons", "mic.png"))
+        self.mic_button.setIcon(QIcon(mic_icon_path))
+        # ---------------------------------
+
         self.mic_button.setIconSize(self.mic_button.size() * 0.5)
         self.mic_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mic_button.clicked.connect(self.start_listening)
