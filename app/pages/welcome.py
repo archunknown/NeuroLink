@@ -66,6 +66,18 @@ class WelcomePage(QWidget):
         main_layout.addLayout(cards_layout)
         main_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
+        # Botón de Salir
+        from PyQt6.QtWidgets import QPushButton
+        from PyQt6.QtGui import QIcon
+        
+        exit_button = QPushButton("Salir")
+        exit_button.setObjectName("btnSecondary")
+        exit_button.setFixedWidth(150)
+        exit_button.setIcon(QIcon(os.path.join("app", "assets", "icons", "close.png"))) # Assuming icon exists or will fallback
+        exit_button.clicked.connect(lambda: parent.close() if parent else self.window().close())
+        
+        main_layout.addWidget(exit_button, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+
         self.setLayout(main_layout)
 
     def on_role_selected(self, role_name):

@@ -11,9 +11,9 @@ def get_conversational_answer(user_query: str) -> str:
     Obtiene una respuesta en lenguaje natural a una pregunta, basándose en 
     el contenido completo de la base de datos.
     """
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return "Error: La clave de API no está configurada."
+        return "Error: La clave de API de Gemini no está configurada."
 
     # 1. Obtener todos los datos de la base de datos
     patients_data = get_all_patients_as_dicts()
@@ -34,32 +34,41 @@ def get_conversational_answer(user_query: str) -> str:
     Si la pregunta no se puede responder con los datos proporcionados, indica amablemente que no tienes esa información.
     No inventes información.
     Aunque el usuario escriba con mala ortografía, debes entender su intención.
+    Si te preguntan por tu desarrollador, creador, etc. Diras que es Adrian Tasayco.
 
     --- DATOS DE PACIENTES (JSON) ---
     {data_str}
     --- FIN DE LOS DATOS ---
     """
 
-    # 3. Llamar a la API
+    # 3. Llamar a la API de Google Gemini
     try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": f"{system_prompt}\n\nPregunta del usuario: {user_query}"}]
+            }]
+        }
+
         response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "alibaba/tongyi-deepresearch-30b-a3b:free",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_query}
-                ]
-            },
-            timeout=30  # Aumentado a 30s por si el prompt es grande
+            url=url,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=30
         )
-        response.raise_for_status()
+        
+        if response.status_code != 200:
+            return f"Error en la API de Gemini ({response.status_code}): {response.text}"
+
         data = response.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "No se pudo generar una respuesta.").strip()
+        
+        # Extraer la respuesta del JSON de Gemini
+        try:
+            answer = data["candidates"][0]["content"]["parts"][0]["text"]
+            return answer.strip()
+        except (KeyError, IndexError):
+            return "La IA no devolvió una respuesta válida."
 
     except requests.exceptions.RequestException as e:
         return f"Hubo un problema de conexión con la API: {e}"
